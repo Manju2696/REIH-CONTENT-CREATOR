@@ -23,9 +23,30 @@ except ImportError:
     # dotenv not available, skip loading
     pass
 
-# MongoDB connection settings - get from environment variables
-MONGO_URI = os.getenv('MONGO_URI', '')
-DB_NAME = os.getenv('MONGO_DB_NAME', 'REih_content_creator')
+# MongoDB connection settings - check Streamlit Secrets first (for cloud deployment), then environment variables
+MONGO_URI = ''
+DB_NAME = 'REih_content_creator'
+
+# Try Streamlit Secrets first (for Streamlit Cloud deployment)
+try:
+    import streamlit as st
+    if hasattr(st, 'secrets'):
+        # Check if MongoDB secrets exist
+        if 'MongoDB' in st.secrets:
+            MONGO_URI = st.secrets['MongoDB'].get('MONGO_URI', '')
+            DB_NAME = st.secrets['MongoDB'].get('MONGO_DB_NAME', DB_NAME)
+        # Also check for direct MONGO_URI in secrets
+        elif 'MONGO_URI' in st.secrets:
+            MONGO_URI = st.secrets['MONGO_URI']
+            DB_NAME = st.secrets.get('MONGO_DB_NAME', DB_NAME)
+except:
+    # Not running in Streamlit or secrets not available, continue to env vars
+    pass
+
+# Fall back to environment variables (for local development)
+if not MONGO_URI:
+    MONGO_URI = os.getenv('MONGO_URI', '')
+    DB_NAME = os.getenv('MONGO_DB_NAME', DB_NAME)
 
 # Global client and database instances
 _client = None
@@ -37,11 +58,40 @@ def get_db_connection():
     
     # MongoDB is required - check if URI is configured
     if not MONGO_URI:
-        raise ConnectionError(
-            "MongoDB is required but not configured. Please set MONGO_URI in your .env file.\n"
-            "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0\n"
-            "Get your connection string from MongoDB Atlas: https://cloud.mongodb.com/"
-        )
+        # Check if we're running on Streamlit Cloud
+        try:
+            import streamlit as st
+            is_streamlit_cloud = hasattr(st, 'secrets')
+        except:
+            is_streamlit_cloud = False
+        
+        if is_streamlit_cloud:
+            error_msg = (
+                "MongoDB is required but not configured for Streamlit Cloud.\n\n"
+                "**To fix this:**\n"
+                "1. Go to your Streamlit Cloud app settings\n"
+                "2. Click on 'Secrets' in the sidebar\n"
+                "3. Add your MongoDB credentials in one of these formats:\n\n"
+                "**Option 1 (Recommended):**\n"
+                "```toml\n"
+                "[MongoDB]\n"
+                "MONGO_URI = 'mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0'\n"
+                "MONGO_DB_NAME = 'REih_content_creator'\n"
+                "```\n\n"
+                "**Option 2:**\n"
+                "```toml\n"
+                "MONGO_URI = 'mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0'\n"
+                "MONGO_DB_NAME = 'REih_content_creator'\n"
+                "```\n\n"
+                "Get your connection string from MongoDB Atlas: https://cloud.mongodb.com/"
+            )
+        else:
+            error_msg = (
+                "MongoDB is required but not configured. Please set MONGO_URI in your .env file.\n"
+                "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0\n"
+                "Get your connection string from MongoDB Atlas: https://cloud.mongodb.com/"
+            )
+        raise ConnectionError(error_msg)
     
     if _client is None:
         try:
