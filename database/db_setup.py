@@ -14,7 +14,7 @@ import re
 import hashlib
 
 # MongoDB connection settings
-MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/')
+MONGO_URI = os.getenv('MONGO_URI')
 DB_NAME = os.getenv('MONGO_DB_NAME', 'reih_content_creator')
 
 # Global client and database instances
