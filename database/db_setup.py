@@ -27,10 +27,6 @@ except ImportError:
 MONGO_URI = os.getenv('MONGO_URI', '')
 DB_NAME = os.getenv('MONGO_DB_NAME', 'REih_content_creator')
 
-# Use SQLite as fallback only if MongoDB is not configured AND USE_SQLITE is explicitly set to 'true'
-# If MONGO_URI is set, always use MongoDB
-USE_SQLITE = not MONGO_URI and os.getenv('USE_SQLITE', '').lower() == 'true'
-
 # Global client and database instances
 _client = None
 _db = None
@@ -39,13 +35,13 @@ def get_db_connection():
     """Get MongoDB database connection"""
     global _client, _db
     
-    # If no MongoDB URI is configured, raise error with helpful message
+    # MongoDB is required - check if URI is configured
     if not MONGO_URI:
-        error_msg = "MongoDB is not configured. Please set MONGO_URI in your .env file.\n"
-        error_msg += "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=AppName\n"
-        if USE_SQLITE:
-            error_msg += "Or set USE_SQLITE=true to use SQLite instead."
-        raise ConnectionError(error_msg)
+        raise ConnectionError(
+            "MongoDB is required but not configured. Please set MONGO_URI in your .env file.\n"
+            "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0\n"
+            "Get your connection string from MongoDB Atlas: https://cloud.mongodb.com/"
+        )
     
     if _client is None:
         try:
