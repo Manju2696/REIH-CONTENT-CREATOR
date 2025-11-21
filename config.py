@@ -148,13 +148,15 @@ def get_openai_api_key():
     Returns None if not found
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets') and 'OPENAI_API_KEY' in st.secrets:
-            return st.secrets['OPENAI_API_KEY']
-    except:
-        pass
+    # Check multiple formats: [OpenAI][API_KEY], OPENAI_API_KEY
+    api_key = _get_streamlit_secret('API_KEY', 'OpenAI')
+    if not api_key:
+        api_key = _get_streamlit_secret('OPENAI_API_KEY')
     
+    if api_key:
+        return api_key
+    
+    # Fall back to environment variables
     api_key = os.getenv('OPENAI_API_KEY')
     if api_key:
         return api_key
@@ -197,18 +199,43 @@ def get_youtube_credentials():
     Returns dict with credentials or None
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    # Check [YouTube] section first, then direct keys
+    client_id = None
+    client_secret = None
+    refresh_token = None
+    access_token = None
+    
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'YouTube' in st.secrets:
-            youtube_secrets = st.secrets['YouTube']
-            return {
-                'client_id': youtube_secrets.get('CLIENT_ID'),
-                'client_secret': youtube_secrets.get('CLIENT_SECRET'),
-                'refresh_token': youtube_secrets.get('REFRESH_TOKEN'),
-                'access_token': youtube_secrets.get('ACCESS_TOKEN')
-            }
+        if hasattr(st, 'secrets'):
+            # Try [YouTube] section
+            if 'YouTube' in st.secrets:
+                youtube_secrets = st.secrets['YouTube']
+                client_id = youtube_secrets.get('CLIENT_ID') or youtube_secrets.get('client_id')
+                client_secret = youtube_secrets.get('CLIENT_SECRET') or youtube_secrets.get('client_secret')
+                refresh_token = youtube_secrets.get('REFRESH_TOKEN') or youtube_secrets.get('refresh_token')
+                access_token = youtube_secrets.get('ACCESS_TOKEN') or youtube_secrets.get('access_token')
+            
+            # Also try direct keys if section didn't work
+            if not client_id:
+                client_id = _get_streamlit_secret('YOUTUBE_CLIENT_ID')
+            if not client_secret:
+                client_secret = _get_streamlit_secret('YOUTUBE_CLIENT_SECRET')
+            if not refresh_token:
+                refresh_token = _get_streamlit_secret('YOUTUBE_REFRESH_TOKEN')
+            if not access_token:
+                access_token = _get_streamlit_secret('YOUTUBE_ACCESS_TOKEN')
     except:
         pass
+    
+    # If we got credentials from secrets, return them
+    if client_id and client_secret:
+        return {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'refresh_token': refresh_token,
+            'access_token': access_token
+        }
     
     # Second, try environment variables / .env
     client_id = os.getenv('YOUTUBE_CLIENT_ID')
@@ -285,8 +312,9 @@ def has_youtube_credentials():
 def get_openai_model():
     """
     Get OpenAI model from:
-    1. Environment variable (OPENAI_MODEL)
-    2. Config file (config.json)
+    1. Streamlit secrets (when running on Streamlit Cloud)
+    2. Environment variable (OPENAI_MODEL)
+    3. Config file (config.json)
     Returns default model if not found
     """
     # Valid models (GPT-5 support added, but may not be available yet)
@@ -300,8 +328,12 @@ def get_openai_model():
     # Valid model prefixes for validation
     valid_prefixes = ["gpt-5", "gpt-4o"]
     
-    # First, try environment variable
-    model = os.getenv('OPENAI_MODEL')
+    # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    model = _get_streamlit_secret('OPENAI_MODEL')
+    
+    # Second, try environment variable
+    if not model:
+        model = os.getenv('OPENAI_MODEL')
     if model:
         # Validate model - if invalid, fall back to default
         if not any(model.startswith(prefix) for prefix in valid_prefixes):
@@ -475,16 +507,29 @@ def get_instagram_credentials():
     2. Environment variables / .env
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    access_token = None
+    account_id = None
+    
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'Instagram' in st.secrets:
-            instagram_secrets = st.secrets['Instagram']
-            return {
-                'access_token': instagram_secrets.get('ACCESS_TOKEN'),
-                'account_id': instagram_secrets.get('ACCOUNT_ID')
-            }
+        if hasattr(st, 'secrets'):
+            # Try [Instagram] section
+            if 'Instagram' in st.secrets:
+                instagram_secrets = st.secrets['Instagram']
+                access_token = instagram_secrets.get('ACCESS_TOKEN') or instagram_secrets.get('access_token')
+                account_id = instagram_secrets.get('ACCOUNT_ID') or instagram_secrets.get('account_id')
+            
+            # Also try direct keys
+            if not access_token:
+                access_token = _get_streamlit_secret('INSTAGRAM_ACCESS_TOKEN')
+            if not account_id:
+                account_id = _get_streamlit_secret('INSTAGRAM_ACCOUNT_ID')
     except:
         pass
+    
+    # If we got credentials from secrets, return them
+    if access_token and account_id:
+        return {'access_token': access_token, 'account_id': account_id}
     
     # Second, try environment variables
     access_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
@@ -524,16 +569,29 @@ def get_tiktok_credentials():
     2. Environment variables / .env
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    access_token = None
+    advertiser_id = None
+    
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'TikTok' in st.secrets:
-            tiktok_secrets = st.secrets['TikTok']
-            return {
-                'access_token': tiktok_secrets.get('ACCESS_TOKEN'),
-                'advertiser_id': tiktok_secrets.get('ADVERTISER_ID')
-            }
+        if hasattr(st, 'secrets'):
+            # Try [TikTok] section
+            if 'TikTok' in st.secrets:
+                tiktok_secrets = st.secrets['TikTok']
+                access_token = tiktok_secrets.get('ACCESS_TOKEN') or tiktok_secrets.get('access_token')
+                advertiser_id = tiktok_secrets.get('ADVERTISER_ID') or tiktok_secrets.get('advertiser_id')
+            
+            # Also try direct keys
+            if not access_token:
+                access_token = _get_streamlit_secret('TIKTOK_ACCESS_TOKEN')
+            if not advertiser_id:
+                advertiser_id = _get_streamlit_secret('TIKTOK_ADVERTISER_ID')
     except:
         pass
+    
+    # If we got credentials from secrets, return them
+    if access_token and advertiser_id:
+        return {'access_token': access_token, 'advertiser_id': advertiser_id}
     
     # Second, try environment variables
     access_token = os.getenv('TIKTOK_ACCESS_TOKEN')
@@ -573,16 +631,29 @@ def get_reimaginehome_tv_credentials():
     2. Environment variables / .env
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    api_key = None
+    api_url = None
+    
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'ReimaginehomeTV' in st.secrets:
-            tv_secrets = st.secrets['ReimaginehomeTV']
-            return {
-                'api_key': tv_secrets.get('API_KEY'),
-                'api_url': tv_secrets.get('API_URL', 'https://api.reimaginehome.tv/v1')
-            }
+        if hasattr(st, 'secrets'):
+            # Try [ReimaginehomeTV] section
+            if 'ReimaginehomeTV' in st.secrets:
+                tv_secrets = st.secrets['ReimaginehomeTV']
+                api_key = tv_secrets.get('API_KEY') or tv_secrets.get('api_key')
+                api_url = tv_secrets.get('API_URL') or tv_secrets.get('api_url', 'https://api.reimaginehome.tv/v1')
+            
+            # Also try direct keys
+            if not api_key:
+                api_key = _get_streamlit_secret('REIMAGINEHOME_TV_API_KEY')
+            if not api_url:
+                api_url = _get_streamlit_secret('REIMAGINEHOME_TV_API_URL') or 'https://api.reimaginehome.tv/v1'
     except:
         pass
+    
+    # If we got credentials from secrets, return them
+    if api_key:
+        return {'api_key': api_key, 'api_url': api_url or 'https://api.reimaginehome.tv/v1'}
     
     # Second, try environment variables
     api_key = os.getenv('REIMAGINEHOME_TV_API_KEY')
@@ -622,12 +693,9 @@ def get_shared_password():
     3. Default to 'admin123' if not set
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets') and 'APP_PASSWORD' in st.secrets:
-            return st.secrets['APP_PASSWORD']
-    except:
-        pass
+    password = _get_streamlit_secret('APP_PASSWORD')
+    if password:
+        return password
     
     # Second, try environment variable
     password = os.getenv("APP_PASSWORD")
@@ -656,17 +724,37 @@ def get_cloudinary_credentials():
     Returns dict with credentials or None
     """
     # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    cloud_name = None
+    api_key = None
+    api_secret = None
+    
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'Cloudinary' in st.secrets:
-            cloudinary_secrets = st.secrets['Cloudinary']
-            return {
-                'cloud_name': cloudinary_secrets.get('CLOUD_NAME'),
-                'api_key': cloudinary_secrets.get('API_KEY'),
-                'api_secret': cloudinary_secrets.get('API_SECRET')
-            }
+        if hasattr(st, 'secrets'):
+            # Try [Cloudinary] section
+            if 'Cloudinary' in st.secrets:
+                cloudinary_secrets = st.secrets['Cloudinary']
+                cloud_name = cloudinary_secrets.get('CLOUD_NAME') or cloudinary_secrets.get('cloud_name')
+                api_key = cloudinary_secrets.get('API_KEY') or cloudinary_secrets.get('api_key')
+                api_secret = cloudinary_secrets.get('API_SECRET') or cloudinary_secrets.get('api_secret')
+            
+            # Also try direct keys
+            if not cloud_name:
+                cloud_name = _get_streamlit_secret('CLOUDINARY_CLOUD_NAME')
+            if not api_key:
+                api_key = _get_streamlit_secret('CLOUDINARY_API_KEY')
+            if not api_secret:
+                api_secret = _get_streamlit_secret('CLOUDINARY_API_SECRET')
     except:
         pass
+    
+    # If we got credentials from secrets, return them
+    if cloud_name and api_key and api_secret:
+        return {
+            'cloud_name': cloud_name,
+            'api_key': api_key,
+            'api_secret': api_secret
+        }
     
     # Second, try environment variables
     cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME')

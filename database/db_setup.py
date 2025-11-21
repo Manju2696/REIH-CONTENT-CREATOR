@@ -23,41 +23,77 @@ except ImportError:
     # dotenv not available, skip loading
     pass
 
-# MongoDB connection settings - check Streamlit Secrets first (for cloud deployment), then environment variables
-MONGO_URI = ''
-DB_NAME = 'REih_content_creator'
-
-# Try Streamlit Secrets first (for Streamlit Cloud deployment)
-try:
-    import streamlit as st
-    if hasattr(st, 'secrets'):
-        # Check if MongoDB secrets exist
-        if 'MongoDB' in st.secrets:
-            MONGO_URI = st.secrets['MongoDB'].get('MONGO_URI', '')
-            DB_NAME = st.secrets['MongoDB'].get('MONGO_DB_NAME', DB_NAME)
-        # Also check for direct MONGO_URI in secrets
-        elif 'MONGO_URI' in st.secrets:
-            MONGO_URI = st.secrets['MONGO_URI']
-            DB_NAME = st.secrets.get('MONGO_DB_NAME', DB_NAME)
-except:
-    # Not running in Streamlit or secrets not available, continue to env vars
-    pass
-
-# Fall back to environment variables (for local development)
-if not MONGO_URI:
-    MONGO_URI = os.getenv('MONGO_URI', '')
-    DB_NAME = os.getenv('MONGO_DB_NAME', DB_NAME)
+# MongoDB connection settings - will be loaded dynamically
+# Don't load at module level - Streamlit may not be initialized yet
 
 # Global client and database instances
 _client = None
 _db = None
 
+def _get_mongo_credentials():
+    """
+    Get MongoDB credentials dynamically (checks Streamlit Secrets first, then env vars)
+    Returns tuple: (MONGO_URI, DB_NAME)
+    """
+    mongo_uri = ''
+    db_name = 'REih_content_creator'
+    debug_info = []
+    
+    # Try Streamlit Secrets first (for Streamlit Cloud deployment)
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            debug_info.append("✓ Streamlit secrets available")
+            # Check if MongoDB secrets exist in section
+            if 'MongoDB' in st.secrets:
+                debug_info.append("✓ Found [MongoDB] section")
+                mongo_uri = st.secrets['MongoDB'].get('MONGO_URI', '')
+                db_name = st.secrets['MongoDB'].get('MONGO_DB_NAME', db_name)
+                if mongo_uri:
+                    debug_info.append(f"✓ Found MONGO_URI in [MongoDB] section (length: {len(mongo_uri)})")
+                else:
+                    debug_info.append("✗ MONGO_URI not found in [MongoDB] section")
+            # Also check for direct MONGO_URI in secrets
+            elif 'MONGO_URI' in st.secrets:
+                debug_info.append("✓ Found MONGO_URI as direct key")
+                mongo_uri = st.secrets['MONGO_URI']
+                db_name = st.secrets.get('MONGO_DB_NAME', db_name)
+            else:
+                debug_info.append("✗ No MongoDB secrets found")
+                # List available secret keys for debugging
+                try:
+                    available_keys = list(st.secrets.keys()) if hasattr(st.secrets, 'keys') else []
+                    debug_info.append(f"Available secret keys: {', '.join(available_keys) if available_keys else 'none'}")
+                except:
+                    pass
+        else:
+            debug_info.append("✗ Streamlit secrets not available")
+    except Exception as e:
+        debug_info.append(f"✗ Error accessing Streamlit secrets: {str(e)}")
+    
+    # Fall back to environment variables (for local development)
+    if not mongo_uri:
+        mongo_uri = os.getenv('MONGO_URI', '')
+        db_name = os.getenv('MONGO_DB_NAME', db_name)
+        if mongo_uri:
+            debug_info.append("✓ Found MONGO_URI in environment variables")
+        else:
+            debug_info.append("✗ MONGO_URI not found in environment variables")
+    
+    # Store debug info for error messages
+    _get_mongo_credentials.debug_info = debug_info
+    
+    return mongo_uri, db_name
+
 def get_db_connection():
     """Get MongoDB database connection"""
     global _client, _db
     
+    # Get credentials dynamically (checks Streamlit Secrets first)
+    mongo_uri, db_name = _get_mongo_credentials()
+    
     # MongoDB is required - check if URI is configured
-    if not MONGO_URI:
+    if not mongo_uri:
         # Check if we're running on Streamlit Cloud
         try:
             import streamlit as st
@@ -65,9 +101,14 @@ def get_db_connection():
         except:
             is_streamlit_cloud = False
         
+        # Get debug info
+        debug_info = getattr(_get_mongo_credentials, 'debug_info', [])
+        debug_text = "\n".join(debug_info) if debug_info else "No debug information available"
+        
         if is_streamlit_cloud:
             error_msg = (
                 "MongoDB is required but not configured for Streamlit Cloud.\n\n"
+                f"**Debug Information:**\n{debug_text}\n\n"
                 "**To fix this:**\n"
                 "1. Go to your Streamlit Cloud app settings\n"
                 "2. Click on 'Secrets' in the sidebar\n"
@@ -75,19 +116,24 @@ def get_db_connection():
                 "**Option 1 (Recommended):**\n"
                 "```toml\n"
                 "[MongoDB]\n"
-                "MONGO_URI = 'mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0'\n"
-                "MONGO_DB_NAME = 'REih_content_creator'\n"
+                "MONGO_URI = \"mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0\"\n"
+                "MONGO_DB_NAME = \"REih_content_creator\"\n"
                 "```\n\n"
                 "**Option 2:**\n"
                 "```toml\n"
-                "MONGO_URI = 'mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0'\n"
-                "MONGO_DB_NAME = 'REih_content_creator'\n"
+                "MONGO_URI = \"mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0\"\n"
+                "MONGO_DB_NAME = \"REih_content_creator\"\n"
                 "```\n\n"
+                "**Important:**\n"
+                "- Use double quotes (\") not single quotes (') in TOML\n"
+                "- Make sure [MongoDB] section name matches exactly (case-sensitive)\n"
+                "- After saving, wait for app to redeploy\n"
                 "Get your connection string from MongoDB Atlas: https://cloud.mongodb.com/"
             )
         else:
             error_msg = (
                 "MongoDB is required but not configured. Please set MONGO_URI in your .env file.\n"
+                f"**Debug Information:**\n{debug_text}\n\n"
                 "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/REih_content_creator?appName=Cluster0\n"
                 "Get your connection string from MongoDB Atlas: https://cloud.mongodb.com/"
             )
@@ -95,24 +141,38 @@ def get_db_connection():
     
     if _client is None:
         try:
-            _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-            _db = _client[DB_NAME]
+            _client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            _db = _client[db_name]
             # Test connection
             _client.admin.command('ping')
         except Exception as e:
             error_msg = str(e)
             if 'authentication failed' in error_msg.lower() or 'bad auth' in error_msg.lower():
-                raise ConnectionError(
-                    "MongoDB authentication failed. Please check your credentials in .env file.\n"
-                    "Update MONGO_URI with correct username and password.\n"
-                    "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=AppName"
-                )
+                # Check if we're on Streamlit Cloud
+                try:
+                    import streamlit as st
+                    is_cloud = hasattr(st, 'secrets')
+                except:
+                    is_cloud = False
+                
+                if is_cloud:
+                    raise ConnectionError(
+                        "MongoDB authentication failed. Please check your credentials in Streamlit Secrets.\n"
+                        "Go to: App Settings → Secrets → Update [MongoDB] section\n"
+                        "Make sure MONGO_URI has correct username and password."
+                    )
+                else:
+                    raise ConnectionError(
+                        "MongoDB authentication failed. Please check your credentials in .env file.\n"
+                        "Update MONGO_URI with correct username and password.\n"
+                        "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=AppName"
+                    )
             elif 'ConnectionFailure' in str(type(e)) or 'timeout' in error_msg.lower():
                 raise ConnectionError(
                     "Failed to connect to MongoDB. Please check:\n"
                     "1. Your internet connection\n"
                     "2. MongoDB cluster is accessible\n"
-                    "3. MONGO_URI in .env file is correct"
+                    "3. MONGO_URI in Streamlit Secrets (cloud) or .env file (local) is correct"
                 )
             else:
                 raise ConnectionError(f"Failed to connect to MongoDB: {error_msg}")
