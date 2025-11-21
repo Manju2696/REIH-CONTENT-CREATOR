@@ -144,11 +144,28 @@ st.markdown("""
 @st.cache_resource
 def init_database():
     """Initialize database connection and tables"""
-    db.init_db()
-    return True
+    try:
+        db.init_db()
+        return True
+    except Exception as e:
+        error_msg = str(e)
+        st.error(f"❌ **Database Connection Error:** {error_msg}")
+        st.info("""
+        **To fix this:**
+        1. Check your `.env` file and ensure `MONGO_URI` is set correctly
+        2. Format: `MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=AppName`
+        3. Make sure your MongoDB credentials are correct and the cluster is accessible
+        4. Restart the Streamlit app after updating `.env`
+        """)
+        st.stop()
+        return False
 
 # Initialize database on app start
-init_database()
+try:
+    init_database()
+except Exception as e:
+    # Error already handled in init_database function
+    pass
 
 # Authentication - require login
 auth.require_auth()

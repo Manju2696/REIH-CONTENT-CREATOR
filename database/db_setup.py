@@ -12,10 +12,24 @@ import os
 import json
 import re
 import hashlib
+from pathlib import Path
 
-# MongoDB connection settings
-MONGO_URI = os.getenv('MONGO_URI', 'mongodb+srv://Manjunath:*GbMVdGUfL_M22q@cluster0.skwiezx.mongodb.net/?appName=Cluster0')
+# Load .env file if present (before reading environment variables)
+try:
+    from dotenv import load_dotenv
+    env_file = Path(__file__).parent.parent / ".env"
+    load_dotenv(dotenv_path=env_file, override=False)
+except ImportError:
+    # dotenv not available, skip loading
+    pass
+
+# MongoDB connection settings - get from environment variables
+MONGO_URI = os.getenv('MONGO_URI', '')
 DB_NAME = os.getenv('MONGO_DB_NAME', 'REih_content_creator')
+
+# Use SQLite as fallback only if MongoDB is not configured AND USE_SQLITE is explicitly set to 'true'
+# If MONGO_URI is set, always use MongoDB
+USE_SQLITE = not MONGO_URI and os.getenv('USE_SQLITE', '').lower() == 'true'
 
 # Global client and database instances
 _client = None
@@ -24,14 +38,38 @@ _db = None
 def get_db_connection():
     """Get MongoDB database connection"""
     global _client, _db
+    
+    # If no MongoDB URI is configured, raise error with helpful message
+    if not MONGO_URI:
+        error_msg = "MongoDB is not configured. Please set MONGO_URI in your .env file.\n"
+        error_msg += "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=AppName\n"
+        if USE_SQLITE:
+            error_msg += "Or set USE_SQLITE=true to use SQLite instead."
+        raise ConnectionError(error_msg)
+    
     if _client is None:
         try:
-            _client = MongoClient(MONGO_URI)
+            _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
             _db = _client[DB_NAME]
             # Test connection
             _client.admin.command('ping')
-        except ConnectionFailure:
-            raise ConnectionError("Failed to connect to MongoDB")
+        except Exception as e:
+            error_msg = str(e)
+            if 'authentication failed' in error_msg.lower() or 'bad auth' in error_msg.lower():
+                raise ConnectionError(
+                    "MongoDB authentication failed. Please check your credentials in .env file.\n"
+                    "Update MONGO_URI with correct username and password.\n"
+                    "Example: MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?appName=AppName"
+                )
+            elif 'ConnectionFailure' in str(type(e)) or 'timeout' in error_msg.lower():
+                raise ConnectionError(
+                    "Failed to connect to MongoDB. Please check:\n"
+                    "1. Your internet connection\n"
+                    "2. MongoDB cluster is accessible\n"
+                    "3. MONGO_URI in .env file is correct"
+                )
+            else:
+                raise ConnectionError(f"Failed to connect to MongoDB: {error_msg}")
     return _db
 
 def init_db():
