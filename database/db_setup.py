@@ -15,7 +15,7 @@ import hashlib
 
 # MongoDB connection settings
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb+srv://Manjunath:*GbMVdGUfL_M22q@cluster0.skwiezx.mongodb.net/?appName=Cluster0')
-DB_NAME = os.getenv('MONGO_DB_NAME', 'reih_content_creator')
+DB_NAME = os.getenv('MONGO_DB_NAME', 'REih_content_creator')
 
 # Global client and database instances
 _client = None
