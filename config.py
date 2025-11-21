@@ -118,6 +118,28 @@ def _migrate_config_secrets_to_env():
 
 _migrate_config_secrets_to_env()
 
+
+def _get_streamlit_secret(key: str, section: str = None):
+    """
+    Get value from Streamlit Secrets (for cloud deployment)
+    Priority: section[key] > key (direct)
+    Returns None if not found
+    """
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets'):
+            # Try section[key] first (e.g., st.secrets['OpenAI']['API_KEY'])
+            if section and section in st.secrets:
+                if key in st.secrets[section]:
+                    return st.secrets[section][key]
+            # Try direct key (e.g., st.secrets['OPENAI_API_KEY'])
+            if key in st.secrets:
+                return st.secrets[key]
+    except:
+        pass
+    return None
+
+
 def get_openai_api_key():
     """
     Get OpenAI API key from:
