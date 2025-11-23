@@ -30,18 +30,63 @@ if 'code' in query_params and 'scope' in query_params:
             creds = youtube_api_v2.exchange_code_for_credentials(auth_code)
         
         if creds:
-            st.success("✅ YouTube account authenticated successfully!")
-            st.info("💡 Redirecting to Settings page...")
+            # Check if we're on Streamlit Cloud
+            is_streamlit_cloud = False
+            try:
+                if hasattr(st, 'secrets') and st.secrets:
+                    is_streamlit_cloud = True
+            except:
+                pass
             
-            # Redirect to Settings after 2 seconds
-            st.markdown("""
-                <script>
-                    setTimeout(function() {
-                        window.location.href = window.location.origin + '/?page=⚙️+Settings';
-                    }, 2000);
-                </script>
-            """, unsafe_allow_html=True)
+            if is_streamlit_cloud:
+                # On Streamlit Cloud: Show tokens for user to copy to Secrets
+                refresh_token = creds.refresh_token if creds.refresh_token else None
+                access_token = creds.token if creds.token else None
+                
+                st.success("✅ YouTube account authenticated successfully!")
+                st.warning("⚠️ **Important:** Copy the tokens below to Streamlit Secrets to make authentication persistent.")
+                
+                st.markdown("### 📋 Copy These Tokens to Streamlit Secrets")
+                st.markdown("Go to: **App Settings → Secrets** and update the `[YouTube]` section:")
+                
+                # Show tokens in code blocks for easy copying
+                if refresh_token:
+                    st.markdown("**Refresh Token:**")
+                    st.code(refresh_token, language=None)
+                    st.markdown("**Copy this to:** `REFRESH_TOKEN` in `[YouTube]` section")
+                
+                if access_token:
+                    st.markdown("**Access Token:**")
+                    st.code(access_token, language=None)
+                    st.markdown("**Copy this to:** `ACCESS_TOKEN` in `[YouTube]` section")
+                
+                st.markdown("---")
+                st.markdown("""
+                **Example Secrets format:**
+                ```toml
+                [YouTube]
+                CLIENT_ID = "your-client-id"
+                CLIENT_SECRET = "your-client-secret"
+                REFRESH_TOKEN = "paste-refresh-token-here"
+                ACCESS_TOKEN = "paste-access-token-here"
+                ```
+                """)
+                
+                st.info("💡 **Note:** After saving tokens in Secrets, refresh this page or go to Settings to verify authentication.")
+                
+                # Store in session state for Settings page to access
+                if 'youtube_new_tokens' not in st.session_state:
+                    st.session_state.youtube_new_tokens = {}
+                st.session_state.youtube_new_tokens = {
+                    'refresh_token': refresh_token,
+                    'access_token': access_token
+                }
+            else:
+                # Local development: tokens saved to file automatically
+                st.success("✅ YouTube account authenticated successfully!")
+                st.info("💡 Tokens saved locally. Redirecting to Settings page...")
             
+            # Redirect to Settings after showing tokens
             st.markdown("[← Go to Settings](/?page=⚙️+Settings)")
         else:
             st.error("❌ Failed to exchange authorization code for credentials.")

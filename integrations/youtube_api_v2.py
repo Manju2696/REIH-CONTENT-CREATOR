@@ -128,6 +128,7 @@ def get_credentials() -> Optional[Credentials]:
     
     # Check if running on Streamlit Cloud
     is_streamlit_cloud = False
+    st = None
     try:
         import streamlit as st
         if hasattr(st, 'secrets') and st.secrets:
@@ -136,7 +137,7 @@ def get_credentials() -> Optional[Credentials]:
         pass
     
     if is_streamlit_cloud:
-        # On Streamlit Cloud: Load from Streamlit Secrets
+        # On Streamlit Cloud: Load from Streamlit Secrets (or session state as fallback)
         import config
         youtube_creds = config.get_youtube_credentials()
         if not youtube_creds:
@@ -146,6 +147,17 @@ def get_credentials() -> Optional[Credentials]:
         client_secret = youtube_creds.get('client_secret')
         refresh_token = youtube_creds.get('refresh_token')
         access_token = youtube_creds.get('access_token')
+        
+        # Check session state for new tokens (from OAuth callback)
+        try:
+            if st and hasattr(st, 'session_state') and 'youtube_new_tokens' in st.session_state:
+                new_tokens = st.session_state.youtube_new_tokens
+                if new_tokens and new_tokens.get('refresh_token'):
+                    refresh_token = new_tokens.get('refresh_token')
+                if new_tokens and new_tokens.get('access_token'):
+                    access_token = new_tokens.get('access_token')
+        except:
+            pass
         
         if not client_id or not client_secret:
             return None
@@ -237,7 +249,7 @@ def save_credentials(creds: Credentials):
             pass
         
         if is_streamlit_cloud:
-            # On Streamlit Cloud: Save tokens to Streamlit Secrets via config
+            # On Streamlit Cloud: Store tokens in session state and return them for user to copy
             import config
             refresh_token = creds.refresh_token if creds.refresh_token else None
             access_token = creds.token if creds.token else None
@@ -245,12 +257,19 @@ def save_credentials(creds: Credentials):
             # Get existing client_id and client_secret to preserve them
             youtube_creds = config.get_youtube_credentials()
             if youtube_creds:
-                client_id = youtube_creds.get('client_id')
-                client_secret = youtube_creds.get('client_secret')
-                # Save tokens to Streamlit Secrets (this will show a message that user needs to update manually)
-                # Note: We can't programmatically update Streamlit Secrets, so we'll show a message
-                # The tokens are already in memory and will work for the current session
-                # User needs to manually copy tokens to Streamlit Secrets for persistence
+                # Store tokens in session state so they can be displayed to user
+                try:
+                    import streamlit as st
+                    if 'youtube_new_tokens' not in st.session_state:
+                        st.session_state.youtube_new_tokens = {}
+                    st.session_state.youtube_new_tokens = {
+                        'refresh_token': refresh_token,
+                        'access_token': access_token,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                except:
+                    pass
+                # Return True to indicate tokens were obtained (user needs to copy to Secrets)
                 return True
         else:
             # Local development: Save to pickle file

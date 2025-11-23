@@ -257,6 +257,41 @@ def show():
                 masked_client_id = youtube_creds['client_id'][:8] + "..." + youtube_creds['client_id'][-4:] if len(youtube_creds['client_id']) > 12 else "***"
                 st.success(f"✅ YouTube API is configured: `{masked_client_id}`")
                 
+                # Check for new tokens from OAuth callback
+                if 'youtube_new_tokens' in st.session_state and st.session_state.youtube_new_tokens:
+                    new_tokens = st.session_state.youtube_new_tokens
+                    st.info("🔑 **New tokens received!** Copy them to Streamlit Secrets to complete authentication.")
+                    with st.expander("📋 Copy New Tokens to Streamlit Secrets", expanded=True):
+                        st.markdown("**Steps:**")
+                        st.markdown("1. Go to your Streamlit Cloud app dashboard")
+                        st.markdown("2. Navigate to: **App Settings → Secrets**")
+                        st.markdown("3. Update the `[YouTube]` section with the tokens below:")
+                        st.markdown("")
+                        if new_tokens.get('refresh_token'):
+                            st.markdown("**Refresh Token (REQUIRED):**")
+                            st.code(new_tokens.get('refresh_token'), language=None)
+                            st.markdown("**Copy this to:** `REFRESH_TOKEN` in `[YouTube]` section")
+                        if new_tokens.get('access_token'):
+                            st.markdown("**Access Token (optional, will be refreshed automatically):**")
+                            st.code(new_tokens.get('access_token'), language=None)
+                            st.markdown("**Copy this to:** `ACCESS_TOKEN` in `[YouTube]` section")
+                        st.markdown("")
+                        st.markdown("**Example format in Secrets:**")
+                        st.code("""[YouTube]
+CLIENT_ID = "your-client-id"
+CLIENT_SECRET = "your-client-secret"
+REFRESH_TOKEN = "paste-refresh-token-here"
+ACCESS_TOKEN = "paste-access-token-here"
+""", language="toml")
+                        st.markdown("")
+                        st.warning("⚠️ **Important:** After saving tokens in Secrets, wait a few seconds and refresh this page to verify authentication.")
+                        if st.button("✅ I've copied the tokens to Secrets", key="tokens_copied"):
+                            # Clear session state tokens after user confirms
+                            del st.session_state.youtube_new_tokens
+                            st.success("✅ Tokens cleared from session. Please refresh the page after updating Secrets to verify authentication.")
+                            st.rerun()
+                    st.markdown("---")
+                
                 # Check authentication status
                 try:
                     from integrations import youtube_api_v2
