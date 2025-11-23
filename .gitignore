@@ -38,8 +38,11 @@ database/*.sqlite
 database/*.sqlite3
 
 # Streamlit
-.streamlit/
 .streamlit/secrets.toml
+streamlit_secrets.toml
+# Allow config.toml and example files
+!.streamlit/config.toml
+!.streamlit/secrets.toml.example
 
 # Configuration files with sensitive data
 config.json

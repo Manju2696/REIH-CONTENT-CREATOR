@@ -36,7 +36,11 @@ streamlit run app.py
 
 ### Deploy to Streamlit Cloud
 
-See [QUICK_DEPLOY.md](QUICK_DEPLOY.md) for step-by-step deployment instructions.
+**Quick Start**: See [STREAMLIT_CLOUD_QUICK_START.md](STREAMLIT_CLOUD_QUICK_START.md) for a 3-step deployment guide.
+
+**Full Guide**: See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed step-by-step instructions.
+
+**Secrets Template**: See [.streamlit/secrets.toml.example](.streamlit/secrets.toml.example) for the required format.
 
 ## Project Structure
 
@@ -77,7 +81,11 @@ REimaginehome Content Creator/
 API keys can be configured in two ways:
 
 1. **Local Development**: Copy `.env.example` to `.env` and add your credentials (file is excluded from Git).
-2. **Streamlit Cloud**: Define the same keys inside Streamlit Secrets.
+2. **Streamlit Cloud**: Add secrets in App Settings → Secrets. See [.streamlit/secrets.toml.example](.streamlit/secrets.toml.example) for the format.
+
+The app automatically prioritizes:
+- **Streamlit Secrets** (when running on Streamlit Cloud)
+- **Environment Variables** (from `.env` file for local development)
 
 ### Master Prompts
 
@@ -91,11 +99,25 @@ Create and manage multiple master prompts in Settings → Master Prompt. The act
 
 ## Database
 
-The app uses SQLite for data storage. Database files are created automatically in the `data/` directory.
+The app uses **MongoDB** for data storage. 
+
+- **Local Development**: Set `MONGO_URI` and `MONGO_DB_NAME` in your `.env` file
+- **Streamlit Cloud**: Add MongoDB credentials in Streamlit Secrets under `[MongoDB]` section
+
+Get your MongoDB connection string from [MongoDB Atlas](https://cloud.mongodb.com/).
 
 ## Deployment
 
-Set the same environment variables (or Streamlit Secrets) on your hosting platform before running `streamlit run app.py`.
+### Streamlit Cloud (Recommended)
+
+1. Push your code to GitHub
+2. Deploy on [share.streamlit.io](https://share.streamlit.io)
+3. Add secrets in App Settings → Secrets
+4. See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for complete instructions
+
+### Other Platforms
+
+Set the same environment variables (or platform-specific secrets) before running `streamlit run app.py`.
 
 ## Requirements
 

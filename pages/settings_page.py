@@ -168,7 +168,14 @@ def show():
                 if save_clicked:
                     if openai_key:
                         if openai_key.startswith("sk-"):
-                            if config.save_openai_api_key(openai_key):
+                            result = config.save_openai_api_key(openai_key)
+                            if isinstance(result, tuple):
+                                success, message = result
+                                if success:
+                                    st.success(f"✅ {message}")
+                                else:
+                                    st.error(f"❌ {message}")
+                            elif result:
                                 st.success("✅ API key saved successfully!")
                                 st.rerun()
                             else:
@@ -291,7 +298,22 @@ def show():
                             if not youtube_client_secret and secret_saved:
                                 youtube_client_secret = youtube_creds.get('client_secret')
                             if youtube_client_secret:
-                                if config.save_youtube_credentials(youtube_client_id, youtube_client_secret):
+                                result = config.save_youtube_credentials(youtube_client_id, youtube_client_secret)
+                                if isinstance(result, tuple):
+                                    success, message = result
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                        config.clear_youtube_tokens()
+                                        try:
+                                            from integrations import youtube_api_v2
+                                            youtube_api_v2.clear_credentials()
+                                        except Exception:
+                                            pass
+                                        st.info("Please authenticate with YouTube again using the link below.")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"❌ {message}")
+                                elif result:
                                     st.success("✅ YouTube credentials saved!")
                                     config.clear_youtube_tokens()
                                     try:
@@ -395,7 +417,14 @@ def show():
                                 cloudinary_api_secret = cloudinary_creds.get('api_secret')
                             
                             if cloudinary_api_key and cloudinary_api_secret:
-                                if config.save_cloudinary_credentials(cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret):
+                                result = config.save_cloudinary_credentials(cloudinary_cloud_name, cloudinary_api_key, cloudinary_api_secret)
+                                if isinstance(result, tuple):
+                                    success, message = result
+                                    if success:
+                                        st.success(f"✅ {message}")
+                                    else:
+                                        st.error(f"❌ {message}")
+                                elif result:
                                     # Test the connection
                                     try:
                                         from utils.cloudinary_storage import configure_cloudinary, is_configured
@@ -472,7 +501,14 @@ def show():
                 with col_i1:
                     if st.button("💾 Save Instagram Credentials", key="save_instagram", use_container_width=True):
                         if instagram_access_token and instagram_account_id:
-                            if config.save_instagram_credentials(instagram_access_token, instagram_account_id):
+                            result = config.save_instagram_credentials(instagram_access_token, instagram_account_id)
+                            if isinstance(result, tuple):
+                                success, message = result
+                                if success:
+                                    st.success(f"✅ {message}")
+                                else:
+                                    st.error(f"❌ {message}")
+                            elif result:
                                 st.success("✅ Instagram credentials saved!")
                                 st.rerun()
                             else:
@@ -505,7 +541,14 @@ def show():
                 with col_t1:
                     if st.button("💾 Save TikTok Credentials", key="save_tiktok", use_container_width=True):
                         if tiktok_access_token and tiktok_advertiser_id:
-                            if config.save_tiktok_credentials(tiktok_access_token, tiktok_advertiser_id):
+                            result = config.save_tiktok_credentials(tiktok_access_token, tiktok_advertiser_id)
+                            if isinstance(result, tuple):
+                                success, message = result
+                                if success:
+                                    st.success(f"✅ {message}")
+                                else:
+                                    st.error(f"❌ {message}")
+                            elif result:
                                 st.success("✅ TikTok credentials saved!")
                                 st.rerun()
                             else:
@@ -552,7 +595,14 @@ def show():
                 with col_tv1:
                     if st.button("💾 Save Reimaginehome TV Credentials", key="save_tv", use_container_width=True):
                         if tv_api_key:
-                            if config.save_reimaginehome_tv_credentials(tv_api_key, tv_api_url):
+                            result = config.save_reimaginehome_tv_credentials(tv_api_key, tv_api_url)
+                            if isinstance(result, tuple):
+                                success, message = result
+                                if success:
+                                    st.success(f"✅ {message}")
+                                else:
+                                    st.error(f"❌ {message}")
+                            elif result:
                                 st.success("✅ Reimaginehome TV credentials saved!")
                                 st.rerun()
                             else:
@@ -1025,7 +1075,14 @@ def show():
                         st.error("❌ Passwords do not match. Please try again.")
                     else:
                         # Save new password
-                        if config.save_shared_password(new_password):
+                        result = config.save_shared_password(new_password)
+                        if isinstance(result, tuple):
+                            success, message = result
+                            if success:
+                                st.success(f"✅ {message}")
+                            else:
+                                st.error(f"❌ {message}")
+                        elif result:
                             st.success("✅ Shared password updated successfully!")
                             st.info("💡 **Note**: All users will need to use the new password for login. Current session will remain active until logout.")
                         else:

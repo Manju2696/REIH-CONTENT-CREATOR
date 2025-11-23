@@ -22,6 +22,26 @@ ENV_FILE = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_FILE, override=False)
 
 
+def _is_streamlit_cloud():
+    """
+    Check if running on Streamlit Cloud
+    Returns True if on Streamlit Cloud, False otherwise
+    """
+    try:
+        import streamlit as st
+        # Check if Streamlit secrets are available (indicates Streamlit Cloud)
+        if hasattr(st, 'secrets') and st.secrets:
+            # Additional check: Streamlit Cloud sets this environment variable
+            if os.getenv('STREAMLIT_CLOUD') is not None:
+                return True
+            # If secrets exist and are not empty, likely on Streamlit Cloud
+            return True
+    except:
+        pass
+    # Also check environment variable
+    return os.getenv('STREAMLIT_CLOUD') is not None
+
+
 def _ensure_env_file():
     """Make sure the .env file exists before writing."""
     if not ENV_FILE.exists():
@@ -29,7 +49,16 @@ def _ensure_env_file():
 
 
 def _set_env_var(key: str, value: str):
-    """Persist value to .env and process environment."""
+    """
+    Persist value to .env and process environment.
+    NOTE: On Streamlit Cloud, this function does nothing - secrets must be updated in Streamlit Cloud dashboard.
+    """
+    # On Streamlit Cloud, do not write to .env file
+    if _is_streamlit_cloud():
+        # Only update in-memory environment variable, don't write to file
+        os.environ[key] = value
+        return
+    # Local development: write to .env file
     if value is None:
         _unset_env_var(key)
         return
@@ -39,7 +68,16 @@ def _set_env_var(key: str, value: str):
 
 
 def _unset_env_var(key: str):
-    """Remove key from .env and process environment."""
+    """
+    Remove key from .env and process environment.
+    NOTE: On Streamlit Cloud, this function does nothing - secrets must be updated in Streamlit Cloud dashboard.
+    """
+    # On Streamlit Cloud, do not modify .env file
+    if _is_streamlit_cloud():
+        # Only remove from in-memory environment variable
+        os.environ.pop(key, None)
+        return
+    # Local development: remove from .env file
     if ENV_FILE.exists():
         unset_key(str(ENV_FILE), key)
     os.environ.pop(key, None)
@@ -127,37 +165,59 @@ def _get_streamlit_secret(key: str, section: str = None):
     """
     try:
         import streamlit as st
-        if hasattr(st, 'secrets'):
+        if hasattr(st, 'secrets') and st.secrets:
             # Try section[key] first (e.g., st.secrets['OpenAI']['API_KEY'])
             if section and section in st.secrets:
                 if key in st.secrets[section]:
-                    return st.secrets[section][key]
+                    value = st.secrets[section][key]
+                    # Return only if value is not empty
+                    if value and str(value).strip():
+                        return str(value).strip()
             # Try direct key (e.g., st.secrets['OPENAI_API_KEY'])
             if key in st.secrets:
-                return st.secrets[key]
+                value = st.secrets[key]
+                # Return only if value is not empty
+                if value and str(value).strip():
+                    return str(value).strip()
     except:
         pass
+    return None
+
+def _get_env_var(key: str, default: str = None):
+    """
+    Get environment variable and strip whitespace
+    Returns None if not found or empty
+    """
+    value = os.getenv(key, default)
+    if value and str(value).strip():
+        return str(value).strip()
     return None
 
 
 def get_openai_api_key():
     """
     Get OpenAI API key from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variable / .env (OPENAI_API_KEY)
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variable / .env (OPENAI_API_KEY) - only for local development
     Returns None if not found
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
-    # Check multiple formats: [OpenAI][API_KEY], OPENAI_API_KEY
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        # Check multiple formats: [OpenAI][API_KEY], OPENAI_API_KEY
+        api_key = _get_streamlit_secret('API_KEY', 'OpenAI')
+        if not api_key:
+            api_key = _get_streamlit_secret('OPENAI_API_KEY')
+        return api_key
+    
+    # Local development: try Streamlit secrets first, then .env
     api_key = _get_streamlit_secret('API_KEY', 'OpenAI')
     if not api_key:
         api_key = _get_streamlit_secret('OPENAI_API_KEY')
-    
     if api_key:
         return api_key
     
     # Fall back to environment variables
-    api_key = os.getenv('OPENAI_API_KEY')
+    api_key = _get_env_var('OPENAI_API_KEY')
     if api_key:
         return api_key
     
@@ -165,14 +225,17 @@ def get_openai_api_key():
 
 def save_openai_api_key(api_key):
     """
-    Save OpenAI API key to .env file
+    Save OpenAI API key to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
     """
+    if _is_streamlit_cloud():
+        # On Streamlit Cloud, secrets must be updated in the dashboard
+        return False, "Cannot save API keys on Streamlit Cloud. Please update OPENAI_API_KEY in App Settings → Secrets."
     try:
         _set_env_var('OPENAI_API_KEY', api_key)
-        return True
+        return True, "API key saved successfully"
     except Exception as e:
-        print(f"Error saving API key: {e}")
-        return False
+        return False, f"Error saving API key: {e}"
 
 def clear_openai_api_key():
     """
@@ -194,12 +257,50 @@ def has_openai_api_key():
 def get_youtube_credentials():
     """
     Get YouTube API credentials from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variables / .env (YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, etc.)
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variables / .env (YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, etc.) - only for local development
     Returns dict with credentials or None
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
-    # Check [YouTube] section first, then direct keys
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        client_id = None
+        client_secret = None
+        refresh_token = None
+        access_token = None
+        
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                # Try [YouTube] section
+                if 'YouTube' in st.secrets:
+                    youtube_secrets = st.secrets['YouTube']
+                    client_id = youtube_secrets.get('CLIENT_ID') or youtube_secrets.get('client_id')
+                    client_secret = youtube_secrets.get('CLIENT_SECRET') or youtube_secrets.get('client_secret')
+                    refresh_token = youtube_secrets.get('REFRESH_TOKEN') or youtube_secrets.get('refresh_token')
+                    access_token = youtube_secrets.get('ACCESS_TOKEN') or youtube_secrets.get('access_token')
+                
+                # Also try direct keys if section didn't work
+                if not client_id:
+                    client_id = _get_streamlit_secret('YOUTUBE_CLIENT_ID')
+                if not client_secret:
+                    client_secret = _get_streamlit_secret('YOUTUBE_CLIENT_SECRET')
+                if not refresh_token:
+                    refresh_token = _get_streamlit_secret('YOUTUBE_REFRESH_TOKEN')
+                if not access_token:
+                    access_token = _get_streamlit_secret('YOUTUBE_ACCESS_TOKEN')
+        except:
+            pass
+        
+        if client_id and client_secret:
+            return {
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'refresh_token': refresh_token,
+                'access_token': access_token
+            }
+        return None
+    
+    # Local development: try Streamlit secrets first, then .env
     client_id = None
     client_secret = None
     refresh_token = None
@@ -237,11 +338,11 @@ def get_youtube_credentials():
             'access_token': access_token
         }
     
-    # Second, try environment variables / .env
-    client_id = os.getenv('YOUTUBE_CLIENT_ID')
-    client_secret = os.getenv('YOUTUBE_CLIENT_SECRET')
-    refresh_token = os.getenv('YOUTUBE_REFRESH_TOKEN')
-    access_token = os.getenv('YOUTUBE_ACCESS_TOKEN')
+    # Fall back to environment variables / .env
+    client_id = _get_env_var('YOUTUBE_CLIENT_ID')
+    client_secret = _get_env_var('YOUTUBE_CLIENT_SECRET')
+    refresh_token = _get_env_var('YOUTUBE_REFRESH_TOKEN')
+    access_token = _get_env_var('YOUTUBE_ACCESS_TOKEN')
     
     if client_id and client_secret:
         return {
@@ -255,8 +356,11 @@ def get_youtube_credentials():
 
 def save_youtube_credentials(client_id: str, client_secret: str, refresh_token: str = None, access_token: str = None):
     """
-    Save YouTube credentials to .env file
+    Save YouTube credentials to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
     """
+    if _is_streamlit_cloud():
+        return False, "Cannot save credentials on Streamlit Cloud. Please update [YouTube] section in App Settings → Secrets."
     try:
         if client_id:
             _set_env_var('YOUTUBE_CLIENT_ID', client_id)
@@ -272,10 +376,9 @@ def save_youtube_credentials(client_id: str, client_secret: str, refresh_token: 
                 _set_env_var('YOUTUBE_ACCESS_TOKEN', access_token)
             else:
                 _unset_env_var('YOUTUBE_ACCESS_TOKEN')
-        return True
+        return True, "YouTube credentials saved successfully"
     except Exception as e:
-        print(f"Error saving YouTube credentials: {e}")
-        return False
+        return False, f"Error saving YouTube credentials: {e}"
 
 def clear_youtube_credentials():
     """
@@ -333,7 +436,7 @@ def get_openai_model():
     
     # Second, try environment variable
     if not model:
-        model = os.getenv('OPENAI_MODEL')
+        model = _get_env_var('OPENAI_MODEL')
     if model:
         # Validate model - if invalid, fall back to default
         if not any(model.startswith(prefix) for prefix in valid_prefixes):
@@ -503,10 +606,36 @@ def get_model_description(model_id):
 def get_instagram_credentials():
     """
     Get Instagram credentials from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variables / .env
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variables / .env - only for local development
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        access_token = None
+        account_id = None
+        
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                # Try [Instagram] section
+                if 'Instagram' in st.secrets:
+                    instagram_secrets = st.secrets['Instagram']
+                    access_token = instagram_secrets.get('ACCESS_TOKEN') or instagram_secrets.get('access_token')
+                    account_id = instagram_secrets.get('ACCOUNT_ID') or instagram_secrets.get('account_id')
+                
+                # Also try direct keys
+                if not access_token:
+                    access_token = _get_streamlit_secret('INSTAGRAM_ACCESS_TOKEN')
+                if not account_id:
+                    account_id = _get_streamlit_secret('INSTAGRAM_ACCOUNT_ID')
+        except:
+            pass
+        
+        if access_token and account_id:
+            return {'access_token': access_token, 'account_id': account_id}
+        return None
+    
+    # Local development: try Streamlit secrets first, then .env
     access_token = None
     account_id = None
     
@@ -531,25 +660,29 @@ def get_instagram_credentials():
     if access_token and account_id:
         return {'access_token': access_token, 'account_id': account_id}
     
-    # Second, try environment variables
-    access_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
-    account_id = os.getenv('INSTAGRAM_ACCOUNT_ID')
+    # Fall back to environment variables
+    access_token = _get_env_var('INSTAGRAM_ACCESS_TOKEN')
+    account_id = _get_env_var('INSTAGRAM_ACCOUNT_ID')
     
     if access_token and account_id:
         return {'access_token': access_token, 'account_id': account_id}
     return None
 
 def save_instagram_credentials(access_token: str, account_id: str):
-    """Save Instagram credentials to .env"""
+    """
+    Save Instagram credentials to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
+    """
+    if _is_streamlit_cloud():
+        return False, "Cannot save credentials on Streamlit Cloud. Please update [Instagram] section in App Settings → Secrets."
     try:
         if access_token:
             _set_env_var('INSTAGRAM_ACCESS_TOKEN', access_token)
         if account_id:
             _set_env_var('INSTAGRAM_ACCOUNT_ID', account_id)
-        return True
+        return True, "Instagram credentials saved successfully"
     except Exception as e:
-        print(f"Error saving Instagram credentials: {e}")
-        return False
+        return False, f"Error saving Instagram credentials: {e}"
 
 def clear_instagram_credentials():
     """Clear Instagram credentials from environment"""
@@ -565,10 +698,36 @@ def clear_instagram_credentials():
 def get_tiktok_credentials():
     """
     Get TikTok credentials from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variables / .env
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variables / .env - only for local development
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        access_token = None
+        advertiser_id = None
+        
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                # Try [TikTok] section
+                if 'TikTok' in st.secrets:
+                    tiktok_secrets = st.secrets['TikTok']
+                    access_token = tiktok_secrets.get('ACCESS_TOKEN') or tiktok_secrets.get('access_token')
+                    advertiser_id = tiktok_secrets.get('ADVERTISER_ID') or tiktok_secrets.get('advertiser_id')
+                
+                # Also try direct keys
+                if not access_token:
+                    access_token = _get_streamlit_secret('TIKTOK_ACCESS_TOKEN')
+                if not advertiser_id:
+                    advertiser_id = _get_streamlit_secret('TIKTOK_ADVERTISER_ID')
+        except:
+            pass
+        
+        if access_token and advertiser_id:
+            return {'access_token': access_token, 'advertiser_id': advertiser_id}
+        return None
+    
+    # Local development: try Streamlit secrets first, then .env
     access_token = None
     advertiser_id = None
     
@@ -593,25 +752,29 @@ def get_tiktok_credentials():
     if access_token and advertiser_id:
         return {'access_token': access_token, 'advertiser_id': advertiser_id}
     
-    # Second, try environment variables
-    access_token = os.getenv('TIKTOK_ACCESS_TOKEN')
-    advertiser_id = os.getenv('TIKTOK_ADVERTISER_ID')
+    # Fall back to environment variables
+    access_token = _get_env_var('TIKTOK_ACCESS_TOKEN')
+    advertiser_id = _get_env_var('TIKTOK_ADVERTISER_ID')
     
     if access_token and advertiser_id:
         return {'access_token': access_token, 'advertiser_id': advertiser_id}
     return None
 
 def save_tiktok_credentials(access_token: str, advertiser_id: str):
-    """Save TikTok credentials to .env"""
+    """
+    Save TikTok credentials to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
+    """
+    if _is_streamlit_cloud():
+        return False, "Cannot save credentials on Streamlit Cloud. Please update [TikTok] section in App Settings → Secrets."
     try:
         if access_token:
             _set_env_var('TIKTOK_ACCESS_TOKEN', access_token)
         if advertiser_id:
             _set_env_var('TIKTOK_ADVERTISER_ID', advertiser_id)
-        return True
+        return True, "TikTok credentials saved successfully"
     except Exception as e:
-        print(f"Error saving TikTok credentials: {e}")
-        return False
+        return False, f"Error saving TikTok credentials: {e}"
 
 def clear_tiktok_credentials():
     """Clear TikTok credentials from environment"""
@@ -627,10 +790,36 @@ def clear_tiktok_credentials():
 def get_reimaginehome_tv_credentials():
     """
     Get Reimaginehome TV credentials from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variables / .env
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variables / .env - only for local development
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        api_key = None
+        api_url = None
+        
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                # Try [ReimaginehomeTV] section
+                if 'ReimaginehomeTV' in st.secrets:
+                    tv_secrets = st.secrets['ReimaginehomeTV']
+                    api_key = tv_secrets.get('API_KEY') or tv_secrets.get('api_key')
+                    api_url = tv_secrets.get('API_URL') or tv_secrets.get('api_url', 'https://api.reimaginehome.tv/v1')
+                
+                # Also try direct keys
+                if not api_key:
+                    api_key = _get_streamlit_secret('REIMAGINEHOME_TV_API_KEY')
+                if not api_url:
+                    api_url = _get_streamlit_secret('REIMAGINEHOME_TV_API_URL') or 'https://api.reimaginehome.tv/v1'
+        except:
+            pass
+        
+        if api_key:
+            return {'api_key': api_key, 'api_url': api_url or 'https://api.reimaginehome.tv/v1'}
+        return None
+    
+    # Local development: try Streamlit secrets first, then .env
     api_key = None
     api_url = None
     
@@ -655,25 +844,29 @@ def get_reimaginehome_tv_credentials():
     if api_key:
         return {'api_key': api_key, 'api_url': api_url or 'https://api.reimaginehome.tv/v1'}
     
-    # Second, try environment variables
-    api_key = os.getenv('REIMAGINEHOME_TV_API_KEY')
-    api_url = os.getenv('REIMAGINEHOME_TV_API_URL', 'https://api.reimaginehome.tv/v1')
+    # Fall back to environment variables
+    api_key = _get_env_var('REIMAGINEHOME_TV_API_KEY')
+    api_url = _get_env_var('REIMAGINEHOME_TV_API_URL') or 'https://api.reimaginehome.tv/v1'
     
     if api_key:
         return {'api_key': api_key, 'api_url': api_url}
     return None
 
 def save_reimaginehome_tv_credentials(api_key: str, api_url: str = 'https://api.reimaginehome.tv/v1'):
-    """Save Reimaginehome TV credentials to .env"""
+    """
+    Save Reimaginehome TV credentials to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
+    """
+    if _is_streamlit_cloud():
+        return False, "Cannot save credentials on Streamlit Cloud. Please update [ReimaginehomeTV] section in App Settings → Secrets."
     try:
         if api_key:
             _set_env_var('REIMAGINEHOME_TV_API_KEY', api_key)
         if api_url:
             _set_env_var('REIMAGINEHOME_TV_API_URL', api_url)
-        return True
+        return True, "REimaginehome TV credentials saved successfully"
     except Exception as e:
-        print(f"Error saving Reimaginehome TV credentials: {e}")
-        return False
+        return False, f"Error saving REimaginehome TV credentials: {e}"
 
 def clear_reimaginehome_tv_credentials():
     """Clear Reimaginehome TV credentials from environment"""
@@ -688,42 +881,86 @@ def clear_reimaginehome_tv_credentials():
 def get_shared_password():
     """
     Get shared password from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variable (APP_PASSWORD)
-    3. Default to 'admin123' if not set
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variable (APP_PASSWORD) - only for local development
+    3. Default to 'admin123' if not set (local only)
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        password = _get_streamlit_secret('APP_PASSWORD')
+        if password:
+            return password
+        # On Streamlit Cloud, password is required - return None if not found
+        return None
+    
+    # Local development: try Streamlit secrets first, then .env
     password = _get_streamlit_secret('APP_PASSWORD')
     if password:
         return password
     
-    # Second, try environment variable
-    password = os.getenv("APP_PASSWORD")
+    # Fall back to environment variable
+    password = _get_env_var("APP_PASSWORD")
     if password:
         return password
-    return 'admin123'  # Default password
+    return 'admin123'  # Default password for local development
 
 def save_shared_password(password):
     """
-    Save shared password to .env file
+    Save shared password to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
     """
+    if _is_streamlit_cloud():
+        return False, "Cannot save password on Streamlit Cloud. Please update APP_PASSWORD in App Settings → Secrets."
     try:
         if password:
             _set_env_var('APP_PASSWORD', password)
-        return True
+        return True, "Password saved successfully"
     except Exception as e:
-        print(f"Error saving shared password: {e}")
-        return False
+        return False, f"Error saving password: {e}"
 
 # Cloudinary API Functions
 def get_cloudinary_credentials():
     """
     Get Cloudinary credentials from:
-    1. Streamlit secrets (when running on Streamlit Cloud)
-    2. Environment variables / .env
+    1. Streamlit secrets ONLY (when running on Streamlit Cloud)
+    2. Environment variables / .env - only for local development
     Returns dict with credentials or None
     """
-    # First, try Streamlit secrets (for Streamlit Cloud deployment)
+    # On Streamlit Cloud, ONLY read from Streamlit Secrets
+    if _is_streamlit_cloud():
+        cloud_name = None
+        api_key = None
+        api_secret = None
+        
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                # Try [Cloudinary] section
+                if 'Cloudinary' in st.secrets:
+                    cloudinary_secrets = st.secrets['Cloudinary']
+                    cloud_name = cloudinary_secrets.get('CLOUD_NAME') or cloudinary_secrets.get('cloud_name')
+                    api_key = cloudinary_secrets.get('API_KEY') or cloudinary_secrets.get('api_key')
+                    api_secret = cloudinary_secrets.get('API_SECRET') or cloudinary_secrets.get('api_secret')
+                
+                # Also try direct keys
+                if not cloud_name:
+                    cloud_name = _get_streamlit_secret('CLOUDINARY_CLOUD_NAME')
+                if not api_key:
+                    api_key = _get_streamlit_secret('CLOUDINARY_API_KEY')
+                if not api_secret:
+                    api_secret = _get_streamlit_secret('CLOUDINARY_API_SECRET')
+        except:
+            pass
+        
+        if cloud_name and api_key and api_secret:
+            return {
+                'cloud_name': cloud_name,
+                'api_key': api_key,
+                'api_secret': api_secret
+            }
+        return None
+    
+    # Local development: try Streamlit secrets first, then .env
     cloud_name = None
     api_key = None
     api_secret = None
@@ -756,10 +993,10 @@ def get_cloudinary_credentials():
             'api_secret': api_secret
         }
     
-    # Second, try environment variables
-    cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME')
-    api_key = os.getenv('CLOUDINARY_API_KEY')
-    api_secret = os.getenv('CLOUDINARY_API_SECRET')
+    # Fall back to environment variables
+    cloud_name = _get_env_var('CLOUDINARY_CLOUD_NAME')
+    api_key = _get_env_var('CLOUDINARY_API_KEY')
+    api_secret = _get_env_var('CLOUDINARY_API_SECRET')
     
     if cloud_name and api_key and api_secret:
         return {
@@ -772,8 +1009,11 @@ def get_cloudinary_credentials():
 
 def save_cloudinary_credentials(cloud_name: str, api_key: str, api_secret: str):
     """
-    Save Cloudinary credentials to .env file
+    Save Cloudinary credentials to .env file (local) or Streamlit Secrets (cloud)
+    On Streamlit Cloud, returns False with message to update in dashboard
     """
+    if _is_streamlit_cloud():
+        return False, "Cannot save credentials on Streamlit Cloud. Please update [Cloudinary] section in App Settings → Secrets."
     try:
         if cloud_name:
             _set_env_var('CLOUDINARY_CLOUD_NAME', cloud_name)
@@ -781,10 +1021,9 @@ def save_cloudinary_credentials(cloud_name: str, api_key: str, api_secret: str):
             _set_env_var('CLOUDINARY_API_KEY', api_key)
         if api_secret:
             _set_env_var('CLOUDINARY_API_SECRET', api_secret)
-        return True
+        return True, "Cloudinary credentials saved successfully"
     except Exception as e:
-        print(f"Error saving Cloudinary credentials: {e}")
-        return False
+        return False, f"Error saving Cloudinary credentials: {e}"
 
 def clear_cloudinary_credentials():
     """

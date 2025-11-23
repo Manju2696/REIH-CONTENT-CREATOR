@@ -287,8 +287,48 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🔌 Connection Status")
     
+    # Debug: Check if running on Streamlit Cloud
+    is_streamlit_cloud = os.getenv('STREAMLIT_CLOUD') is not None or hasattr(st, 'secrets')
+    cred_source = "Streamlit Secrets" if is_streamlit_cloud else ".env file"
+    
+    with st.expander("ℹ️ How to configure credentials", expanded=False):
+        if is_streamlit_cloud:
+            st.info("**Running on Streamlit Cloud** - Add credentials in: App Settings → Secrets")
+        else:
+            st.info("**Running locally** - Add credentials to `.env` file in the project root")
+        st.markdown("""
+        **Required format in `.env` file:**
+        ```
+        CLOUDINARY_CLOUD_NAME=your-cloud-name
+        CLOUDINARY_API_KEY=your-api-key
+        CLOUDINARY_API_SECRET=your-api-secret
+        
+        YOUTUBE_CLIENT_ID=your-client-id
+        YOUTUBE_CLIENT_SECRET=your-client-secret
+        
+        INSTAGRAM_ACCESS_TOKEN=your-token
+        INSTAGRAM_ACCOUNT_ID=your-account-id
+        
+        TIKTOK_ACCESS_TOKEN=your-token
+        TIKTOK_ADVERTISER_ID=your-advertiser-id
+        
+        REIMAGINEHOME_TV_API_KEY=your-api-key
+        ```
+        """)
+    
     # Check Cloudinary status
     cloudinary_creds = config.get_cloudinary_credentials()
+    missing_cloudinary = []
+    if not cloudinary_creds:
+        missing_cloudinary = ["cloud_name", "api_key", "api_secret"]
+    else:
+        if not cloudinary_creds.get('cloud_name'):
+            missing_cloudinary.append("cloud_name")
+        if not cloudinary_creds.get('api_key'):
+            missing_cloudinary.append("api_key")
+        if not cloudinary_creds.get('api_secret'):
+            missing_cloudinary.append("api_secret")
+    
     if cloudinary_creds and cloudinary_creds.get('cloud_name') and cloudinary_creds.get('api_key') and cloudinary_creds.get('api_secret'):
         try:
             from utils.cloudinary_storage import configure_cloudinary, is_configured
@@ -304,31 +344,61 @@ with st.sidebar:
         except Exception as e:
             st.error(f"☁️ Cloudinary: Not Connected - {str(e)}")
     else:
-        st.error("☁️ Cloudinary: Not Connected - Credentials missing")
+        missing_str = ", ".join(missing_cloudinary) if missing_cloudinary else "all credentials"
+        st.error(f"☁️ Cloudinary: Not Connected - Missing: {missing_str} (Check {cred_source})")
     
     # Check YouTube status
     youtube_creds = config.get_youtube_credentials()
+    missing_youtube = []
+    if not youtube_creds:
+        missing_youtube = ["client_id", "client_secret"]
+    else:
+        if not youtube_creds.get('client_id'):
+            missing_youtube.append("client_id")
+        if not youtube_creds.get('client_secret'):
+            missing_youtube.append("client_secret")
+    
     if youtube_creds and youtube_creds.get('client_id') and youtube_creds.get('client_secret'):
         try:
             from integrations import youtube_api_v2
             if youtube_api_v2.is_youtube_authenticated():
                 st.success("📺 YouTube: Connected")
             else:
-                st.warning("📺 YouTube: Not Authenticated")
-        except:
-            st.warning("📺 YouTube: Not Connected")
+                st.warning("📺 YouTube: Credentials found but not authenticated - Go to Settings to authenticate")
+        except Exception as e:
+            st.warning(f"📺 YouTube: Credentials found but error: {str(e)}")
     else:
-        st.error("📺 YouTube: Not Connected")
+        missing_str = ", ".join(missing_youtube) if missing_youtube else "all credentials"
+        st.error(f"📺 YouTube: Not Connected - Missing: {missing_str} (Check {cred_source})")
     
     # Check Instagram status
     instagram_creds = config.get_instagram_credentials()
+    missing_instagram = []
+    if not instagram_creds:
+        missing_instagram = ["access_token", "account_id"]
+    else:
+        if not instagram_creds.get('access_token'):
+            missing_instagram.append("access_token")
+        if not instagram_creds.get('account_id'):
+            missing_instagram.append("account_id")
+    
     if instagram_creds and instagram_creds.get('access_token') and instagram_creds.get('account_id'):
         st.success("📷 Instagram: Connected")
     else:
-        st.error("📷 Instagram: Not Connected")
+        missing_str = ", ".join(missing_instagram) if missing_instagram else "all credentials"
+        st.error(f"📷 Instagram: Not Connected - Missing: {missing_str} (Check {cred_source})")
     
     # Check TikTok status
     tiktok_creds = config.get_tiktok_credentials()
+    missing_tiktok = []
+    if not tiktok_creds:
+        missing_tiktok = ["access_token", "advertiser_id"]
+    else:
+        if not tiktok_creds.get('access_token'):
+            missing_tiktok.append("access_token")
+        if not tiktok_creds.get('advertiser_id'):
+            missing_tiktok.append("advertiser_id")
+    
     if tiktok_creds and tiktok_creds.get('access_token') and tiktok_creds.get('advertiser_id'):
         try:
             from integrations import tiktok_api
@@ -341,14 +411,15 @@ with st.sidebar:
         except Exception as e:
             st.error(f"🎵 TikTok: Not Connected - {str(e)}")
     else:
-        st.error("🎵 TikTok: Not Connected - Credentials missing")
+        missing_str = ", ".join(missing_tiktok) if missing_tiktok else "all credentials"
+        st.error(f"🎵 TikTok: Not Connected - Missing: {missing_str} (Check {cred_source})")
     
     # Check REih TV status
     reih_tv_creds = config.get_reimaginehome_tv_credentials()
     if reih_tv_creds and reih_tv_creds.get('api_key'):
         st.success("📺 REih TV: Connected")
     else:
-        st.error("📺 REih TV: Not Connected")
+        st.error(f"📺 REih TV: Not Connected - Missing: api_key (Check {cred_source})")
     
     # Add refresh button
     st.markdown("---")
