@@ -173,22 +173,7 @@ auth.require_auth()
 
 # Sidebar navigation
 with st.sidebar:
-    # Show user info and logout button at the top
     user_email = auth.get_user_email()
-    st.markdown(f"**👤 Logged in as:** `{user_email}`")
-    
-    # Logout button
-    if st.button("🚪 Logout", use_container_width=True, type="secondary", help="Click to logout"):
-        auth.logout()
-    
-    st.markdown("---")
-    # Add a visible header with instructions
-    st.markdown("""
-        <div style="padding: 10px; background-color: #2d2d2d; border-radius: 8px; margin-bottom: 20px;">
-            <h1 style="font-size: 1.5rem; font-weight: bold; color: #1f77b4; text-align: center; padding: 0.5rem 0; margin: 0;">⚙️ REimaginehome</h1>
-            <p style="font-size: 0.9rem; color: #888; text-align: center; margin: 0;">Content Creator</p>
-        </div>
-    """, unsafe_allow_html=True)
     
     # Initialize page selection in session state
     if 'page' not in st.session_state:
@@ -226,7 +211,6 @@ with st.sidebar:
     
     # Show current page indicator
     st.caption(f"📍 Current: {st.session_state.page}")
-    st.markdown("---")
     
     # Generate Scripts page
     gen_scripts_clicked = st.button("📝 Generate Scripts", key="nav_Generate Scripts", use_container_width=True, 
@@ -280,9 +264,6 @@ with st.sidebar:
             pass
         st.rerun()
     
-    # Add separator before Settings
-    st.markdown("---")
-    
     # Settings button
     settings_button_style = "primary" if st.session_state.page == "⚙️ Settings" else "secondary"
     settings_clicked = st.button("⚙️ Settings", key="nav_Settings", use_container_width=True, 
@@ -298,7 +279,6 @@ with st.sidebar:
         st.rerun()
     
     # Connection Status Section
-    st.markdown("---")
     st.markdown("### 🔌 Connection Status")
     
     # Debug: Check if running on Streamlit Cloud
@@ -436,9 +416,14 @@ with st.sidebar:
         st.error(f"📺 REih TV: Not Connected - Missing: api_key (Check {cred_source})")
     
     # Add refresh button
-    st.markdown("---")
+    st.write("")
     if st.button("🔄 Refresh", use_container_width=True, type="secondary", help="Refresh the page and reload data"):
         st.rerun()
+
+    st.write("")
+    st.caption(f"👤 Logged in as `{user_email}`")
+    if st.button("🚪 Logout", key="sidebar_logout", use_container_width=True, type="secondary", help="Click to logout"):
+        auth.logout()
 
 st.markdown('<h1 class="main-header">⚙️ REimaginehome Content Creator</h1>', unsafe_allow_html=True)
 

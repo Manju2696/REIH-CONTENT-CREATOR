@@ -1,6 +1,6 @@
 """
 REimagineHome TV Page
-Display YouTube videos in grid view with full-size autoplay player
+YouTube Shorts/Instagram Reels style vertical video player
 """
 
 import streamlit as st
@@ -87,13 +87,13 @@ def show():
         with col1:
             video_input = st.text_input(
                 "YouTube Video ID or URL",
-                placeholder="Enter YouTube video ID or URL (e.g., dQw4w9WgXcQ or https://youtube.com/watch?v=dQw4w9WgXcQ)",
+                placeholder="Enter YouTube video ID or URL",
                 key="tv_video_input"
             )
         
         with col2:
-            st.write("")  # Spacing
-            st.write("")  # Spacing
+            st.write("")
+            st.write("")
             add_button = st.button("Add Video", type="primary", use_container_width=True, key="tv_add_button")
         
         if add_button:
@@ -118,7 +118,6 @@ def show():
     if 'tv_play' in query_params:
         video_id_to_play = query_params.get('tv_play')
         st.session_state.tv_fullscreen_video = video_id_to_play
-        # Clear the query param
         try:
             new_params = dict(query_params)
             del new_params['tv_play']
@@ -129,7 +128,7 @@ def show():
     
     # Check if we're in fullscreen mode
     if st.session_state.tv_fullscreen_video:
-        # Fullscreen player with scrollable autoplay
+        # YouTube Shorts/Instagram Reels style vertical player
         video_id = st.session_state.tv_fullscreen_video
         all_videos = get_all_videos()
         
@@ -140,13 +139,12 @@ def show():
                 current_index = i
                 break
         
-        # Back button (positioned absolutely in the player)
-        # Create shorts-style vertical player with autoplay
+        # Create vertical shorts-style player
         player_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
                 * {{
                     margin: 0;
@@ -159,27 +157,30 @@ def show():
                     overflow-x: hidden;
                     overflow-y: auto;
                     background-color: #000;
-                    font-family: Arial, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     scroll-behavior: smooth;
                     scroll-snap-type: y mandatory;
+                    -webkit-overflow-scrolling: touch;
                 }}
                 .back-button {{
                     position: fixed;
-                    top: 20px;
-                    left: 20px;
-                    z-index: 1000;
-                    background-color: rgba(0, 0, 0, 0.7);
+                    top: 15px;
+                    left: 15px;
+                    z-index: 10000;
+                    background-color: rgba(0, 0, 0, 0.6);
                     color: white;
                     border: none;
-                    padding: 10px 20px;
-                    border-radius: 25px;
+                    padding: 8px 16px;
+                    border-radius: 20px;
                     cursor: pointer;
-                    font-size: 14px;
-                    font-weight: bold;
-                    transition: background-color 0.3s;
+                    font-size: 13px;
+                    font-weight: 600;
+                    backdrop-filter: blur(10px);
+                    transition: all 0.2s;
                 }}
                 .back-button:hover {{
-                    background-color: rgba(0, 0, 0, 0.9);
+                    background-color: rgba(0, 0, 0, 0.8);
+                    transform: scale(1.05);
                 }}
                 .video-list {{
                     display: flex;
@@ -187,7 +188,7 @@ def show():
                     width: 100%;
                 }}
                 .video-item {{
-                    width: 100%;
+                    width: 100vw;
                     height: 100vh;
                     min-height: 100vh;
                     position: relative;
@@ -197,43 +198,58 @@ def show():
                     justify-content: center;
                     scroll-snap-align: start;
                     scroll-snap-stop: always;
-                }}
-                .video-wrapper {{
-                    width: 100%;
-                    height: 100vh;
-                    position: relative;
                     overflow: hidden;
+                }}
+                .video-container {{
+                    width: 100%;
+                    height: 100%;
+                    position: relative;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                 }}
                 .video-item iframe {{
-                    width: 100vw;
-                    height: 100vh;
                     border: none;
                     position: absolute;
-                    top: 0;
-                    left: 0;
                 }}
-                /* Vertical shorts-style: videos fill entire viewport */
-                /* Force vertical layout - each video takes full screen */
+                /* YouTube Shorts/Instagram Reels Style - Vertical Layout */
+                /* Force vertical container: 9:16 aspect ratio (portrait) */
+                /* Mobile: Full height, constrain width to 9:16 */
                 @media (max-width: 768px) {{
-                    .video-item iframe {{
-                        width: 100vw;
+                    .video-container {{
+                        width: 56.25vh; /* 9:16 = height * 9/16, but we use height as base */
+                        max-width: 100vw;
                         height: 100vh;
+                        margin: 0 auto;
+                    }}
+                    .video-item iframe {{
+                        width: 100%;
+                        height: 100%;
+                        top: 0;
+                        left: 0;
                     }}
                 }}
-                /* On desktop: also full viewport for true shorts experience */
+                /* Desktop: Center vertical container */
                 @media (min-width: 769px) {{
-                    .video-item iframe {{
-                        width: 100vw;
+                    .video-container {{
+                        width: 56.25vh; /* 9:16 aspect ratio: height * 9/16 */
+                        max-width: 100vw;
                         height: 100vh;
+                        margin: 0 auto;
+                    }}
+                    .video-item iframe {{
+                        width: 100%;
+                        height: 100%;
+                        top: 0;
+                        left: 0;
                     }}
                 }}
+                /* This creates a vertical Shorts/Reels style container */
+                /* Videos will be centered and letterboxed within the vertical frame */
             </style>
         </head>
         <body>
-            <button class="back-button" onclick="window.location.href='?back_to_grid=1'">← Back to Grid</button>
+            <button class="back-button" onclick="window.location.href='?back_to_grid=1'">← Back</button>
             <div class="video-list" id="videoList">
         """
         
@@ -241,15 +257,13 @@ def show():
         for i, video in enumerate(all_videos):
             vid_id = video.get('video_id')
             if vid_id:
-                # First video (current) should autoplay
                 autoplay = "1" if i == current_index else "0"
-                # Enable autoplay for all videos when they come into view
                 player_html += f"""
                     <div class="video-item" data-video-id="{vid_id}" data-index="{i}">
-                        <div class="video-wrapper">
+                        <div class="video-container">
                             <iframe 
-                                src="https://www.youtube.com/embed/{vid_id}?autoplay={autoplay}&enablejsapi=1&playsinline=1&rel=0&modestbranding=1"
-                                allow="autoplay; encrypted-media"
+                                src="https://www.youtube.com/embed/{vid_id}?autoplay={autoplay}&enablejsapi=1&playsinline=1&rel=0&modestbranding=1&controls=1"
+                                allow="autoplay; encrypted-media; fullscreen"
                                 allowfullscreen
                                 id="player_{i}"
                             ></iframe>
@@ -258,7 +272,6 @@ def show():
                 """
         
         player_html += f"""
-                </div>
             </div>
             <script>
                 // YouTube IFrame API
@@ -283,9 +296,7 @@ def show():
                             events: {{
                                 'onReady': function(event) {{
                                     playersReady++;
-                                    // Auto-play start video when all players are ready
                                     if (playersReady === totalPlayers) {{
-                                        // Scroll to start video (shorts style - snap to top)
                                         var startItem = document.querySelector('[data-index="' + startIndex + '"]');
                                         if (startItem) {{
                                             startItem.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
@@ -294,12 +305,11 @@ def show():
                                                     players[startIndex].playVideo();
                                                     currentPlayingIndex = startIndex;
                                                 }}
-                                            }}, 500);
+                                            }}, 300);
                                         }}
                                     }}
                                 }},
                                 'onStateChange': function(event) {{
-                                    // When video ends, play next
                                     if (event.data === YT.PlayerState.ENDED) {{
                                         playNextVideo(index);
                                     }}
@@ -308,31 +318,28 @@ def show():
                         }});
                     }});
                     
-                    // Intersection Observer for autoplay on scroll (shorts style - full viewport)
+                    // Intersection Observer for autoplay on scroll
                     var observerOptions = {{
                         root: null,
-                        rootMargin: '-10% 0px -10% 0px',
-                        threshold: 0.8
+                        rootMargin: '-5% 0px -5% 0px',
+                        threshold: 0.7
                     }};
                     
                     var observer = new IntersectionObserver(function(entries) {{
                         entries.forEach(function(entry) {{
                             if (entry.isIntersecting) {{
                                 var index = parseInt(entry.target.getAttribute('data-index'));
-                                // Pause current video if different
                                 if (currentPlayingIndex !== -1 && currentPlayingIndex !== index) {{
                                     if (players[currentPlayingIndex]) {{
                                         players[currentPlayingIndex].pauseVideo();
                                     }}
                                 }}
-                                // Play the video in view
                                 if (players[index] && players[index].getPlayerState() !== YT.PlayerState.PLAYING) {{
                                     players[index].playVideo();
                                     currentPlayingIndex = index;
                                 }}
                             }} else {{
                                 var index = parseInt(entry.target.getAttribute('data-index'));
-                                // Pause video when it goes out of view
                                 if (players[index] && players[index].getPlayerState() === YT.PlayerState.PLAYING) {{
                                     players[index].pauseVideo();
                                 }}
@@ -340,7 +347,6 @@ def show():
                         }});
                     }}, observerOptions);
                     
-                    // Observe all video items
                     videoItems.forEach(function(item) {{
                         observer.observe(item);
                     }});
@@ -349,14 +355,13 @@ def show():
                 function playNextVideo(currentIndex) {{
                     var nextIndex = currentIndex + 1;
                     if (players[nextIndex]) {{
-                        // Scroll to next video (shorts style - snap to top)
                         var nextItem = document.querySelector('[data-index="' + nextIndex + '"]');
                         if (nextItem) {{
                             nextItem.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
                             setTimeout(function() {{
                                 players[nextIndex].playVideo();
                                 currentPlayingIndex = nextIndex;
-                            }}, 500);
+                            }}, 300);
                         }}
                     }}
                 }}
@@ -365,14 +370,12 @@ def show():
         </html>
         """
         
-        # Use full viewport height for shorts-style player - make it tall enough for scrolling
-        # Calculate height: number of videos * viewport height (100vh each)
+        # Calculate component height for scrolling
         num_videos = len(all_videos)
-        component_height = max(900, num_videos * 800)  # At least 800px per video
+        component_height = max(900, num_videos * 900)
         components.html(player_html, height=component_height, scrolling=True)
         
-        # Handle back button via query params
-        query_params = st.query_params
+        # Handle back button
         if 'back_to_grid' in query_params:
             st.session_state.tv_fullscreen_video = None
             try:
@@ -382,7 +385,7 @@ def show():
             st.rerun()
         
     else:
-        # Grid view
+        # Grid view with clickable thumbnails
         videos = get_all_videos()
         
         if not videos:
@@ -403,13 +406,12 @@ def show():
                     video_db_id = video.get('id')
                     
                     with col:
-                        # Clickable thumbnail - use HTML component with proper click handling
+                        # Clickable thumbnail
                         thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                         
-                        # Create clickable thumbnail HTML
                         thumbnail_html = f"""
                         <div style="position: relative; cursor: pointer; margin-bottom: 10px;" 
-                             onclick="window.location.href = '?tv_play={video_id}'">
+                             onclick="window.location.href='?tv_play={video_id}'">
                             <img src="{thumbnail_url}" 
                                  style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); 
                                         transition: transform 0.2s; display: block;" 
@@ -450,4 +452,3 @@ def show():
                             if st.button("🗑️", key=delete_key, use_container_width=True, help="Delete video"):
                                 st.session_state[f'pending_delete_tv_{video_db_id}'] = True
                                 st.rerun()
-
