@@ -113,6 +113,20 @@ def show():
     
     st.divider()
     
+    # Check for play video query parameter (from thumbnail click)
+    query_params = st.query_params
+    if 'tv_play' in query_params:
+        video_id_to_play = query_params.get('tv_play')
+        st.session_state.tv_fullscreen_video = video_id_to_play
+        # Clear the query param
+        try:
+            new_params = dict(query_params)
+            del new_params['tv_play']
+            st.query_params = new_params
+        except:
+            pass
+        st.rerun()
+    
     # Check if we're in fullscreen mode
     if st.session_state.tv_fullscreen_video:
         # Fullscreen player with scrollable autoplay
@@ -199,25 +213,29 @@ def show():
                     overflow: hidden;
                 }}
                 .video-item iframe {{
-                    width: 100vw;
-                    height: 100vh;
+                    width: 100%;
+                    height: 100%;
                     border: none;
                     position: absolute;
                     top: 0;
                     left: 0;
-                    object-fit: cover;
                 }}
-                /* Ensure videos fill entire viewport for shorts-style */
+                /* Vertical shorts-style: videos fill viewport height */
+                /* On mobile: full width and height */
                 @media (max-width: 768px) {{
                     .video-item iframe {{
                         width: 100vw;
                         height: 100vh;
                     }}
                 }}
+                /* On desktop: center video maintaining 16:9 aspect ratio */
                 @media (min-width: 769px) {{
                     .video-item iframe {{
-                        width: 100vw;
                         height: 100vh;
+                        width: 177.78vh; /* 16:9 = height * 16/9 */
+                        max-width: 100vw;
+                        left: 50%;
+                        transform: translateX(-50%);
                     }}
                 }}
             </style>
@@ -393,37 +411,27 @@ def show():
                     video_db_id = video.get('id')
                     
                     with col:
-                        # Clickable thumbnail using HTML component
+                        # Clickable thumbnail - use URL-based approach
                         thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                         
-                        # Create clickable thumbnail component
-                        clickable_thumbnail = f"""
-                        <div style="position: relative; cursor: pointer; margin-bottom: 10px;" 
-                             onclick="window.location.href='?play_video={video_id}'">
-                            <img src="{thumbnail_url}" 
-                                 style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); 
-                                        transition: transform 0.2s; display: block;" 
-                                 onmouseover="this.style.transform='scale(1.05)'" 
-                                 onmouseout="this.style.transform='scale(1)'" />
-                            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                                        background-color: rgba(0,0,0,0.7); border-radius: 50%; width: 60px; height: 60px; 
-                                        display: flex; align-items: center; justify-content: center; pointer-events: none;">
-                                <span style="color: white; font-size: 24px; margin-left: 3px;">▶</span>
+                        # Create clickable thumbnail that uses URL to trigger play
+                        thumbnail_html = f"""
+                        <a href="?tv_play={video_id}" style="text-decoration: none; display: block;">
+                            <div style="position: relative; cursor: pointer; margin-bottom: 10px;">
+                                <img src="{thumbnail_url}" 
+                                     style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); 
+                                            transition: transform 0.2s; display: block;" 
+                                     onmouseover="this.style.transform='scale(1.05)'" 
+                                     onmouseout="this.style.transform='scale(1)'" />
+                                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+                                            background-color: rgba(0,0,0,0.7); border-radius: 50%; width: 60px; height: 60px; 
+                                            display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                                    <span style="color: white; font-size: 24px; margin-left: 3px;">▶</span>
+                                </div>
                             </div>
-                        </div>
+                        </a>
                         """
-                        components.html(clickable_thumbnail, height=180)
-                        
-                        # Check for play_video query parameter
-                        query_params = st.query_params
-                        if 'play_video' in query_params and query_params['play_video'] == video_id:
-                            st.session_state.tv_fullscreen_video = video_id
-                            # Clear the query param
-                            try:
-                                st.query_params.clear()
-                            except:
-                                pass
-                            st.rerun()
+                        components.html(thumbnail_html, height=200)
                         
                         # Title
                         st.markdown(f"**{title[:50]}{'...' if len(title) > 50 else ''}**")
