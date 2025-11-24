@@ -209,8 +209,6 @@ with st.sidebar:
             except Exception:
                 pass
     
-    # Removed current page caption to simplify sidebar
-    
     # Generate Scripts page
     gen_scripts_clicked = st.button("📝 Generate Scripts", key="nav_Generate Scripts", use_container_width=True, 
                 type="primary" if st.session_state.page == "📝 Generate Scripts" else "secondary")
