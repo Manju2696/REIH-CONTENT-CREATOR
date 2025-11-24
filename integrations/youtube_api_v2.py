@@ -1,132 +1,556 @@
 """
-YouTube Data API v3 Integration - Version 2
-Uses Google's official Python client library for reliable video uploads
+YouTube API helper used across the app.
+
+This module handles:
+- OAuth flow (authorization URL + exchanging code)
+- Persisting tokens (Streamlit Cloud friendly)
+- Building an authenticated YouTube service
+- Uploading videos (including optional Cloudinary downloads + thumbnail upload)
+
+The implementation purposefully keeps a minimal surface area so that other
+parts of the app only care about:
+    - get_authorization_url()
+    - exchange_code_for_credentials(code)
+    - is_youtube_authenticated()
+    - upload_video_to_youtube(...)
 """
 
-import os
+from __future__ import annotations
+
 import json
+import os
 import tempfile
-from typing import Optional, Dict, Any, List
+from datetime import date, datetime
 from pathlib import Path
-import sys
-from datetime import datetime, date
+from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except ImportError:
-    REQUESTS_AVAILABLE = False
-    print("Warning: requests library not installed. Run: pip install requests")
+import requests
 
-# Add parent directory to path to import config
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config as cfg
 import database.db_setup as db
 
+# Google API imports
 try:
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import Flow
     from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
     from googleapiclient.errors import HttpError
+    from googleapiclient.http import MediaFileUpload
     from google.auth.transport.requests import Request
-    import pickle
-    LIBRARIES_AVAILABLE = True
-except ImportError:
-    LIBRARIES_AVAILABLE = False
-    print("Warning: Google API libraries not installed. Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 
-# OAuth 2.0 scopes
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
+    GOOGLE_LIBS_AVAILABLE = True
+except ImportError:
+    GOOGLE_LIBS_AVAILABLE = False
+
+# ---------------------------------------------------------------------------
+# Configuration helpers
+# ---------------------------------------------------------------------------
+
+SCOPES: List[str] = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl",
+]
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+CREDENTIALS_DIR = BASE_DIR / "credentials"
+CREDENTIALS_DIR.mkdir(exist_ok=True)
+TOKEN_PATH = CREDENTIALS_DIR / "youtube_tokens.json"
+
+
+def _is_streamlit_cloud() -> bool:
+    try:
+        import streamlit as st  # type: ignore
+
+        if hasattr(st, "secrets") and st.secrets:
+            return True
+    except Exception:
+        pass
+    return bool(os.getenv("STREAMLIT_CLOUD"))
+
+
+def _get_streamlit_secrets() -> Dict[str, Any]:
+    if not _is_streamlit_cloud():
+        return {}
+    try:
+        import streamlit as st  # type: ignore
+
+        if hasattr(st, "secrets"):
+            return dict(st.secrets.get("YouTube", {})) or dict(st.secrets.get("youtube", {}))
+    except Exception:
+        pass
+    return {}
+
 
 def get_redirect_uri() -> str:
-    """
-    Get the appropriate redirect URI based on the environment.
-    Returns Streamlit Cloud URL if on Streamlit Cloud, otherwise localhost.
-    """
-    # Check if running on Streamlit Cloud
-    is_streamlit_cloud = False
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets') and st.secrets:
-            is_streamlit_cloud = True
-    except:
-        pass
-    
-    # Also check environment variable
-    if os.getenv('STREAMLIT_CLOUD') is not None:
-        is_streamlit_cloud = True
-    
-    if is_streamlit_cloud:
-        # On Streamlit Cloud, use the app URL
-        # Check for custom URL in environment variable first
-        streamlit_url = os.getenv('STREAMLIT_APP_URL')
+    if _is_streamlit_cloud():
+        streamlit_url = os.getenv("STREAMLIT_APP_URL")
         if streamlit_url:
             return f"{streamlit_url.rstrip('/')}/youtube_callback"
-        
-        # Default Streamlit Cloud URL (user's app)
+        # default app URL
         return "https://reih-content-creator-4leuhlnaasfsjsxztqu5wj.streamlit.app/youtube_callback"
-    
-    # Default to localhost for local development
     return "http://localhost:8501/youtube_callback"
 
-def get_credentials_file_path():
-    """Get path to credentials file"""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    creds_dir = os.path.join(base_dir, "credentials")
-    os.makedirs(creds_dir, exist_ok=True)
-    return os.path.join(creds_dir, "youtube_token.pickle")
 
-def get_client_config() -> Optional[Dict]:
-    """Get OAuth client configuration"""
-    client_id = None
-    client_secret = None
-    
-    # Check if running on Streamlit Cloud
-    is_streamlit_cloud = False
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets') and st.secrets:
-            is_streamlit_cloud = True
-    except:
-        pass
-    
-    if is_streamlit_cloud:
-        # On Streamlit Cloud: Get from Streamlit Secrets via config
-        import config
-        youtube_creds = config.get_youtube_credentials()
-        if youtube_creds:
-            client_id = youtube_creds.get('client_id')
-            client_secret = youtube_creds.get('client_secret')
-    else:
-        # Local development: Try environment variables first
-        client_id = os.getenv('YOUTUBE_CLIENT_ID')
-        client_secret = os.getenv('YOUTUBE_CLIENT_SECRET')
-        
-        # If not in env, try config file
-        if not client_id or not client_secret:
-            if cfg.CONFIG_FILE.exists():
-                try:
-                    with open(cfg.CONFIG_FILE, 'r') as f:
-                        config_data = json.load(f)
-                        youtube_config = config_data.get('youtube', {})
-                        client_id = youtube_config.get('client_id') or client_id
-                        client_secret = youtube_config.get('client_secret') or client_secret
-                except (json.JSONDecodeError, IOError):
-                    pass
-    
+def _get_client_credentials() -> Tuple[Optional[str], Optional[str]]:
+    secrets = _get_streamlit_secrets()
+    client_id = secrets.get("CLIENT_ID") or secrets.get("client_id")
+    client_secret = secrets.get("CLIENT_SECRET") or secrets.get("client_secret")
+
     if client_id and client_secret:
-        return {
-            "web": {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [get_redirect_uri()]
-            }
+        return client_id, client_secret
+
+    # Fallback to env vars (local dev)
+    client_id = os.getenv("YOUTUBE_CLIENT_ID", client_id)
+    client_secret = os.getenv("YOUTUBE_CLIENT_SECRET", client_secret)
+
+    # Fallback to config.json
+    config_file = BASE_DIR / "config.json"
+    if (not client_id or not client_secret) and config_file.exists():
+        try:
+            data = json.loads(config_file.read_text())
+            y_config = data.get("youtube", {})
+            client_id = y_config.get("client_id", client_id)
+            client_secret = y_config.get("client_secret", client_secret)
+        except Exception:
+            pass
+
+    return client_id, client_secret
+
+
+def _build_client_config() -> Optional[Dict[str, Any]]:
+    client_id, client_secret = _get_client_credentials()
+    if not client_id or not client_secret:
+        return None
+    return {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [get_redirect_uri()],
         }
-    
-    return None
+    }
+
+
+# ---------------------------------------------------------------------------
+# Token management
+# ---------------------------------------------------------------------------
+
+def _load_local_tokens() -> Optional[Dict[str, Any]]:
+    if not TOKEN_PATH.exists():
+        return None
+    try:
+        return json.loads(TOKEN_PATH.read_text())
+    except Exception:
+        return None
+
+
+def _save_local_tokens(creds: Credentials) -> None:
+    TOKEN_PATH.write_text(
+        json.dumps(
+            {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri,
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": creds.scopes,
+            },
+            indent=2,
+        )
+    )
+
+
+def _load_streamlit_tokens() -> Dict[str, Any]:
+    secrets = _get_streamlit_secrets()
+    return {
+        "token": secrets.get("ACCESS_TOKEN") or secrets.get("access_token"),
+        "refresh_token": secrets.get("REFRESH_TOKEN") or secrets.get("refresh_token"),
+    }
+
+
+def _store_streamlit_tokens(creds: Credentials) -> None:
+    """
+    Streamlit Cloud can't write to secrets, so we keep fresh tokens in session
+    state for the user to copy. The Settings page already checks
+    `st.session_state.youtube_new_tokens`.
+    """
+    try:
+        import streamlit as st  # type: ignore
+
+        st.session_state["youtube_new_tokens"] = {
+            "access_token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+    except Exception:
+        pass
+
+
+def _build_credentials_from_tokens(tokens: Dict[str, Any]) -> Optional[Credentials]:
+    if not tokens:
+        return None
+
+    client_id, client_secret = _get_client_credentials()
+    if not client_id or not client_secret:
+        return None
+
+    try:
+        creds = Credentials(
+            token=tokens.get("token"),
+            refresh_token=tokens.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=SCOPES,
+        )
+        return creds
+    except Exception:
+        return None
+
+
+def _load_credentials() -> Optional[Credentials]:
+    if not GOOGLE_LIBS_AVAILABLE:
+        return None
+
+    creds = None
+    if _is_streamlit_cloud():
+        tokens = _load_streamlit_tokens()
+        creds = _build_credentials_from_tokens(tokens)
+    else:
+        tokens = _load_local_tokens()
+        if tokens:
+            creds = Credentials.from_authorized_user_info(tokens, SCOPES)
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            if _is_streamlit_cloud():
+                _store_streamlit_tokens(creds)
+            else:
+                _save_local_tokens(creds)
+        except Exception:
+            return None
+
+    return creds
+
+
+def _persist_credentials(creds: Credentials) -> None:
+    if _is_streamlit_cloud():
+        _store_streamlit_tokens(creds)
+    else:
+        _save_local_tokens(creds)
+
+
+def clear_credentials() -> bool:
+    if TOKEN_PATH.exists():
+        TOKEN_PATH.unlink()
+    try:
+        import streamlit as st  # type: ignore
+
+        if "youtube_new_tokens" in st.session_state:
+            del st.session_state["youtube_new_tokens"]
+    except Exception:
+        pass
+    return True
+
+
+# ---------------------------------------------------------------------------
+# OAuth helpers
+# ---------------------------------------------------------------------------
+
+def get_authorization_url() -> Optional[str]:
+    if not GOOGLE_LIBS_AVAILABLE:
+        return None
+
+    config = _build_client_config()
+    if not config:
+        return None
+
+    flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=get_redirect_uri())
+    url, _ = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
+    return url
+
+
+def exchange_code_for_credentials(auth_code: str) -> Optional[Credentials]:
+    if not GOOGLE_LIBS_AVAILABLE:
+        return None
+
+    config = _build_client_config()
+    if not config:
+        return None
+
+    flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=get_redirect_uri())
+    flow.fetch_token(code=auth_code)
+    creds = flow.credentials
+    if creds:
+        _persist_credentials(creds)
+    return creds
+
+
+def get_credentials() -> Optional[Credentials]:
+    return _load_credentials()
+
+
+def is_youtube_authenticated() -> bool:
+    creds = get_credentials()
+    return bool(creds and creds.valid)
+
+
+def get_youtube_service():
+    if not GOOGLE_LIBS_AVAILABLE:
+        return None
+    creds = get_credentials()
+    if not creds:
+        return None
+    return build("youtube", "v3", credentials=creds)
+
+
+# ---------------------------------------------------------------------------
+# Upload helpers
+# ---------------------------------------------------------------------------
+
+def _download_remote_file(url: str, suffix: str) -> Tuple[Optional[str], Optional[str]]:
+    try:
+        response = requests.get(url, stream=True, timeout=300)
+        response.raise_for_status()
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                temp_file.write(chunk)
+        temp_file.close()
+        return temp_file.name, temp_file.name
+    except Exception:
+        return None, None
+
+
+def _tags_from_keywords(keywords: Any) -> List[str]:
+    if not keywords or keywords == "N/A":
+        return []
+    if isinstance(keywords, str):
+        return [t.strip() for t in keywords.split(",") if t.strip()]
+    if isinstance(keywords, list):
+        return [str(t).strip() for t in keywords if t]
+    return []
+
+
+def upload_video_to_youtube(
+    video_file_path: str,
+    title: str,
+    description: str = "",
+    tags: Optional[List[str]] = None,
+    category_id: str = "22",
+    privacy_status: str = "unlisted",
+    thumbnail_file_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Upload a video to YouTube with the provided metadata.
+    """
+    if not GOOGLE_LIBS_AVAILABLE:
+        return {"success": False, "error": "Google API libraries not installed."}
+
+    youtube = get_youtube_service()
+    if not youtube:
+        return {"success": False, "error": "YouTube account not authenticated."}
+
+    # Validate file or download if remote
+    is_remote = isinstance(video_file_path, str) and video_file_path.startswith("http")
+    temp_video = None
+    if is_remote:
+        temp_video, video_path = _download_remote_file(video_file_path, ".mp4")
+    else:
+        video_path = video_file_path
+
+    if not video_path or (not is_remote and not os.path.exists(video_path)):
+        return {"success": False, "error": "Video file not found."}
+
+    title = (title or "").strip()[:100]
+    description = (description or "").strip()[:5000]
+    final_tags = tags if tags is not None else []
+
+    if not final_tags:
+        final_tags = _tags_from_keywords(tags)
+
+    body = {
+        "snippet": {
+            "title": title or "Untitled Video",
+            "description": description,
+            "categoryId": category_id or "22",
+        },
+        "status": {
+            "privacyStatus": privacy_status if privacy_status in {"public", "private", "unlisted"} else "unlisted",
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+    if final_tags:
+        body["snippet"]["tags"] = final_tags[:10]
+
+    media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/*")
+
+    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+
+    try:
+        response = None
+        while response is None:
+            _, response = request.next_chunk()
+        video_id = response.get("id")
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        if thumbnail_file_path:
+            _upload_thumbnail(youtube, video_id, thumbnail_file_path)
+
+        track_youtube_upload_success()
+
+        return {"success": True, "video_id": video_id, "video_url": video_url}
+    except HttpError as error:
+        if error.resp.status in (401, 403):
+            return {
+                "success": False,
+                "error": "Permission denied. Make sure you granted all YouTube scopes and your account has a YouTube channel.",
+            }
+        return {"success": False, "error": f"YouTube API error: {error}"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+    finally:
+        if temp_video and os.path.exists(temp_video):
+            os.unlink(temp_video)
+
+
+def _upload_thumbnail(youtube, video_id: str, thumbnail_path: str) -> None:
+    """Upload thumbnail image for a video."""
+    try:
+        path_to_use = thumbnail_path
+        temp_thumb = None
+        if thumbnail_path.startswith("http"):
+            temp_thumb, path_to_use = _download_remote_file(thumbnail_path, ".jpg")
+
+        if not path_to_use or not os.path.exists(path_to_use):
+            return
+
+        youtube.thumbnails().set(
+            videoId=video_id,
+            media_body=MediaFileUpload(path_to_use, mimetype="image/jpeg", resumable=False),
+        ).execute()
+    except Exception as exc:
+        print(f"[WARNING] Thumbnail upload failed: {exc}")
+    finally:
+        if temp_thumb and os.path.exists(temp_thumb):
+            os.unlink(temp_thumb)
+
+
+# ---------------------------------------------------------------------------
+# Lightweight account + quota helpers (kept for compatibility)
+# ---------------------------------------------------------------------------
+
+def check_youtube_account_status() -> Dict[str, Any]:
+    youtube = get_youtube_service()
+    if not youtube:
+        return {"error": "Not authenticated."}
+    try:
+        resp = (
+            youtube.channels()
+            .list(part="snippet,statistics", mine=True)
+            .execute()
+        )
+        if resp.get("items"):
+            channel = resp["items"][0]
+            return {
+                "success": True,
+                "channel_id": channel.get("id"),
+                "channel_title": channel.get("snippet", {}).get("title"),
+                "subscriber_count": channel.get("statistics", {}).get("subscriberCount"),
+                "video_count": channel.get("statistics", {}).get("videoCount"),
+            }
+        return {"error": "No YouTube channel found for this account."}
+    except HttpError as error:
+        return {"error": f"YouTube API error: {error}"}
+
+
+def track_youtube_upload_success() -> None:
+    try:
+        today = date.today().isoformat()
+        record = db.execute_query(
+            """
+            SELECT id, upload_count FROM youtube_upload_tracking WHERE upload_date = ?
+        """,
+            (today,),
+        )
+        if record:
+            db.execute_update(
+                """
+                UPDATE youtube_upload_tracking
+                SET upload_count = upload_count + 1, last_upload_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """,
+                (record[0]["id"],),
+            )
+        else:
+            db.execute_insert(
+                """
+                INSERT INTO youtube_upload_tracking (upload_date, upload_count, daily_limit, created_at, updated_at)
+                VALUES (?, 1, 6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+                (today,),
+            )
+    except Exception as exc:
+        print(f"[WARNING] Failed to track YouTube upload: {exc}")
+
+
+def track_youtube_upload_limit_reached() -> None:
+    try:
+        today = date.today().isoformat()
+        db.execute_insert(
+            """
+            INSERT INTO youtube_upload_tracking (upload_date, upload_count, daily_limit, created_at, updated_at)
+            VALUES (?, 6, 6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(upload_date) DO UPDATE SET upload_count = 6, updated_at = CURRENT_TIMESTAMP
+        """,
+            (today,),
+        )
+    except Exception as exc:
+        print(f"[WARNING] Failed to track upload limit: {exc}")
+
+
+def get_youtube_upload_status() -> Dict[str, Any]:
+    try:
+        today = date.today().isoformat()
+        result = db.execute_query(
+            """
+            SELECT upload_count, daily_limit, last_upload_at
+            FROM youtube_upload_tracking
+            WHERE upload_date = ?
+        """,
+            (today,),
+        )
+        if result:
+            record = result[0]
+            limit = record.get("daily_limit", 6) or 6
+            count = record.get("upload_count", 0) or 0
+            return {
+                "today": today,
+                "upload_count": count,
+                "daily_limit": limit,
+                "remaining": max(0, limit - count),
+                "limit_reached": count >= limit,
+                "last_upload_at": record.get("last_upload_at"),
+            }
+        return {
+            "today": today,
+            "upload_count": 0,
+            "daily_limit": 6,
+            "remaining": 6,
+            "limit_reached": False,
+            "last_upload_at": None,
+        }
+    except Exception as exc:
+        return {
+            "today": date.today().isoformat(),
+            "upload_count": 0,
+            "daily_limit": 6,
+            "remaining": 6,
+            "limit_reached": False,
+            "error": str(exc),
+        }
 
 def get_credentials() -> Optional[Credentials]:
     """
