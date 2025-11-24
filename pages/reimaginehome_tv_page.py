@@ -143,8 +143,11 @@ def show():
                     width: 100%;
                     height: 100%;
                     overflow-x: hidden;
+                    overflow-y: auto;
                     background-color: #000;
                     font-family: Arial, sans-serif;
+                    scroll-behavior: smooth;
+                    scroll-snap-type: y mandatory;
                 }}
                 .back-button {{
                     position: fixed;
@@ -178,13 +181,44 @@ def show():
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    scroll-snap-align: start;
+                    scroll-snap-stop: always;
+                }}
+                .video-wrapper {{
+                    width: 100%;
+                    height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                }}
+                .video-wrapper {{
+                    width: 100%;
+                    height: 100vh;
+                    position: relative;
+                    overflow: hidden;
                 }}
                 .video-item iframe {{
-                    width: 100%;
-                    height: 100%;
-                    max-width: 100%;
-                    max-height: 100vh;
+                    width: 100vw;
+                    height: 100vh;
                     border: none;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    object-fit: cover;
+                }}
+                /* Ensure videos fill entire viewport for shorts-style */
+                @media (max-width: 768px) {{
+                    .video-item iframe {{
+                        width: 100vw;
+                        height: 100vh;
+                    }}
+                }}
+                @media (min-width: 769px) {{
+                    .video-item iframe {{
+                        width: 100vw;
+                        height: 100vh;
+                    }}
                 }}
             </style>
         </head>
@@ -202,12 +236,14 @@ def show():
                 # Enable autoplay for all videos when they come into view
                 player_html += f"""
                     <div class="video-item" data-video-id="{vid_id}" data-index="{i}">
-                        <iframe 
-                            src="https://www.youtube.com/embed/{vid_id}?autoplay={autoplay}&enablejsapi=1&playsinline=1&rel=0&modestbranding=1"
-                            allow="autoplay; encrypted-media"
-                            allowfullscreen
-                            id="player_{i}"
-                        ></iframe>
+                        <div class="video-wrapper">
+                            <iframe 
+                                src="https://www.youtube.com/embed/{vid_id}?autoplay={autoplay}&enablejsapi=1&playsinline=1&rel=0&modestbranding=1"
+                                allow="autoplay; encrypted-media"
+                                allowfullscreen
+                                id="player_{i}"
+                            ></iframe>
+                        </div>
                     </div>
                 """
         
@@ -319,8 +355,11 @@ def show():
         </html>
         """
         
-        # Use full viewport height for shorts-style player
-        components.html(player_html, height=900, scrolling=True)
+        # Use full viewport height for shorts-style player - make it tall enough for scrolling
+        # Calculate height: number of videos * viewport height (100vh each)
+        num_videos = len(all_videos)
+        component_height = max(900, num_videos * 800)  # At least 800px per video
+        components.html(player_html, height=component_height, scrolling=True)
         
         # Handle back button via query params
         query_params = st.query_params
