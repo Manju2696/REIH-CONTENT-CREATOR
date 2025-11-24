@@ -209,8 +209,7 @@ with st.sidebar:
             except Exception:
                 pass
     
-    # Show current page indicator
-    st.caption(f"📍 Current: {st.session_state.page}")
+    # Removed current page caption to simplify sidebar
     
     # Generate Scripts page
     gen_scripts_clicked = st.button("📝 Generate Scripts", key="nav_Generate Scripts", use_container_width=True, 
@@ -284,31 +283,6 @@ with st.sidebar:
     # Debug: Check if running on Streamlit Cloud
     is_streamlit_cloud = os.getenv('STREAMLIT_CLOUD') is not None or hasattr(st, 'secrets')
     cred_source = "Streamlit Secrets" if is_streamlit_cloud else ".env file"
-    
-    with st.expander("ℹ️ How to configure credentials", expanded=False):
-        if is_streamlit_cloud:
-            st.info("**Running on Streamlit Cloud** - Add credentials in: App Settings → Secrets")
-        else:
-            st.info("**Running locally** - Add credentials to `.env` file in the project root")
-        st.markdown("""
-        **Required format in `.env` file:**
-        ```
-        CLOUDINARY_CLOUD_NAME=your-cloud-name
-        CLOUDINARY_API_KEY=your-api-key
-        CLOUDINARY_API_SECRET=your-api-secret
-        
-        YOUTUBE_CLIENT_ID=your-client-id
-        YOUTUBE_CLIENT_SECRET=your-client-secret
-        
-        INSTAGRAM_ACCESS_TOKEN=your-token
-        INSTAGRAM_ACCOUNT_ID=your-account-id
-        
-        TIKTOK_ACCESS_TOKEN=your-token
-        TIKTOK_ADVERTISER_ID=your-advertiser-id
-        
-        REIMAGINEHOME_TV_API_KEY=your-api-key
-        ```
-        """)
     
     # Check Cloudinary status
     cloudinary_creds = config.get_cloudinary_credentials()
