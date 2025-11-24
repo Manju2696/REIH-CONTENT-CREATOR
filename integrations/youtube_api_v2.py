@@ -79,9 +79,41 @@ def get_credentials_file_path():
 
 def get_client_config() -> Optional[Dict]:
     """Get OAuth client configuration"""
-    # Try environment variables first
-    client_id = os.getenv('YOUTUBE_CLIENT_ID')
-    client_secret = os.getenv('YOUTUBE_CLIENT_SECRET')
+    client_id = None
+    client_secret = None
+    
+    # Check if running on Streamlit Cloud
+    is_streamlit_cloud = False
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and st.secrets:
+            is_streamlit_cloud = True
+    except:
+        pass
+    
+    if is_streamlit_cloud:
+        # On Streamlit Cloud: Get from Streamlit Secrets via config
+        import config
+        youtube_creds = config.get_youtube_credentials()
+        if youtube_creds:
+            client_id = youtube_creds.get('client_id')
+            client_secret = youtube_creds.get('client_secret')
+    else:
+        # Local development: Try environment variables first
+        client_id = os.getenv('YOUTUBE_CLIENT_ID')
+        client_secret = os.getenv('YOUTUBE_CLIENT_SECRET')
+        
+        # If not in env, try config file
+        if not client_id or not client_secret:
+            if cfg.CONFIG_FILE.exists():
+                try:
+                    with open(cfg.CONFIG_FILE, 'r') as f:
+                        config_data = json.load(f)
+                        youtube_config = config_data.get('youtube', {})
+                        client_id = youtube_config.get('client_id') or client_id
+                        client_secret = youtube_config.get('client_secret') or client_secret
+                except (json.JSONDecodeError, IOError):
+                    pass
     
     if client_id and client_secret:
         return {
@@ -93,28 +125,6 @@ def get_client_config() -> Optional[Dict]:
                 "redirect_uris": [get_redirect_uri()]
             }
         }
-    
-    # Try config file
-    if cfg.CONFIG_FILE.exists():
-        try:
-            with open(cfg.CONFIG_FILE, 'r') as f:
-                config_data = json.load(f)
-                youtube_config = config_data.get('youtube', {})
-                client_id = youtube_config.get('client_id')
-                client_secret = youtube_config.get('client_secret')
-                
-                if client_id and client_secret:
-                    return {
-                        "web": {
-                            "client_id": client_id,
-                            "client_secret": client_secret,
-                            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                            "token_uri": "https://oauth2.googleapis.com/token",
-                            "redirect_uris": [get_redirect_uri()]
-                        }
-                    }
-        except (json.JSONDecodeError, IOError):
-            pass
     
     return None
 
@@ -171,22 +181,26 @@ def get_credentials() -> Optional[Credentials]:
             creds = None
             if refresh_token:
                 # Create credentials from refresh token
+                # If access_token is empty/None, create without it (will be refreshed)
                 creds = Credentials(
-                    token=access_token,
+                    token=access_token if access_token else None,
                     refresh_token=refresh_token,
                     token_uri="https://oauth2.googleapis.com/token",
                     client_id=client_id,
-                    client_secret=client_secret
+                    client_secret=client_secret,
+                    scopes=SCOPES  # Explicitly set scopes
                 )
                 
-                # Refresh if expired
-                if creds.expired and creds.refresh_token:
+                # Refresh if expired or if token is None
+                if (creds.expired or not creds.token) and creds.refresh_token:
                     try:
                         creds.refresh(Request())
                         # Update access token in Streamlit Secrets (user needs to do this manually)
                         # For now, token works in memory for current session
+                        print(f"Credentials refreshed successfully")
                     except Exception as e:
                         print(f"Error refreshing credentials: {e}")
+                        # If refresh fails, return None to force re-authentication
                         return None
             elif access_token:
                 # Use access token directly (will expire, but works for now)
@@ -309,27 +323,51 @@ def get_authorization_url() -> Optional[str]:
 def exchange_code_for_credentials(authorization_code: str) -> Optional[Credentials]:
     """Exchange authorization code for credentials"""
     if not LIBRARIES_AVAILABLE:
+        print("Error: Google API libraries not available")
         return None
     
     client_config = get_client_config()
     if not client_config:
+        print("Error: Could not get client configuration. Check CLIENT_ID and CLIENT_SECRET in Secrets.")
         return None
+    
+    redirect_uri = get_redirect_uri()
+    print(f"Using redirect URI: {redirect_uri}")
     
     try:
         flow = Flow.from_client_config(
             client_config,
             scopes=SCOPES,
-            redirect_uri=get_redirect_uri()
+            redirect_uri=redirect_uri
         )
         flow.fetch_token(code=authorization_code)
         creds = flow.credentials
         
+        if not creds:
+            print("Error: No credentials returned from token exchange")
+            return None
+        
         # Save credentials
         if save_credentials(creds):
+            print("Credentials saved successfully")
             return creds
-        return None
+        else:
+            print("Warning: Credentials obtained but could not be saved (this is OK on Streamlit Cloud)")
+            # Return creds anyway - they're in memory and can be displayed to user
+            return creds
     except Exception as e:
-        print(f"Error exchanging code for credentials: {e}")
+        error_msg = str(e)
+        print(f"Error exchanging code for credentials: {error_msg}")
+        print(f"Error type: {type(e).__name__}")
+        
+        # Provide more specific error messages
+        if 'redirect_uri_mismatch' in error_msg.lower():
+            print("ERROR: Redirect URI mismatch. Check Google Cloud Console authorized redirect URIs.")
+        elif 'invalid_grant' in error_msg.lower():
+            print("ERROR: Invalid authorization code. Code may have expired or been used already.")
+        elif 'invalid_client' in error_msg.lower():
+            print("ERROR: Invalid client credentials. Check CLIENT_ID and CLIENT_SECRET in Secrets.")
+        
         return None
 
 def get_youtube_service() -> Optional[Any]:
@@ -434,6 +472,41 @@ def upload_video_to_youtube(
     youtube = get_youtube_service()
     if not youtube:
         return {"error": "Not authenticated. Please authenticate your YouTube account in Settings."}
+    
+    # Validate credentials before upload - test with a simple API call
+    try:
+        # Test credentials by getting channel info
+        test_response = youtube.channels().list(part='id', mine=True).execute()
+        if not test_response.get('items'):
+            return {
+                "error": "Permission denied",
+                "message": "Your account doesn't have a YouTube channel. Please create a YouTube channel first at youtube.com"
+            }
+    except HttpError as e:
+        if e.resp.status == 403:
+            return {
+                "error": "Permission denied",
+                "message": (
+                    "Permission denied when accessing YouTube API. Common causes:\n"
+                    "1. OAuth consent screen is in 'Testing' mode - Add your email as a test user in Google Cloud Console\n"
+                    "2. YouTube Data API v3 is not enabled - Enable it in Google Cloud Console\n"
+                    "3. OAuth scope 'youtube.upload' was not granted - Re-authenticate and grant all permissions\n"
+                    "4. Your Google account doesn't have a YouTube channel - Create one at youtube.com"
+                )
+            }
+        elif e.resp.status == 401:
+            return {
+                "error": "Authentication failed",
+                "message": "Your access token expired. Please re-authenticate in Settings."
+            }
+        else:
+            return {
+                "error": f"YouTube API Error: {e.resp.status}",
+                "message": str(e)
+            }
+    except Exception as e:
+        # If test fails for other reasons, continue with upload attempt
+        print(f"Warning: Could not validate credentials before upload: {str(e)}")
     
     # Handle Cloudinary URLs - download to temporary file first
     temp_file_path = None
@@ -604,7 +677,17 @@ def upload_video_to_youtube(
                         track_youtube_upload_limit_reached()
                     elif 'forbidden' in reasons or error.resp.status == 403:
                         error_details['error'] = "Permission denied"
-                        error_details['message'] = "Check YouTube API permissions and OAuth scopes."
+                        # Provide more specific error message
+                        if 'insufficient permission' in error_message_lower or 'permission' in error_message_lower:
+                            error_details['message'] = (
+                                "Permission denied. This usually means:\n"
+                                "1. Your OAuth consent screen is in 'Testing' mode - Add your email as a test user in Google Cloud Console\n"
+                                "2. YouTube Data API v3 is not enabled - Enable it in Google Cloud Console\n"
+                                "3. The OAuth scope 'youtube.upload' was not granted - Re-authenticate and make sure to grant all permissions\n"
+                                "4. Your Google account doesn't have a YouTube channel - Create a YouTube channel first"
+                            )
+                        else:
+                            error_details['message'] = f"Permission denied: {error_message}. Check YouTube API permissions and OAuth scopes."
                     elif 'unauthorized' in reasons or error.resp.status == 401:
                         error_details['error'] = "Authentication failed"
                         error_details['message'] = "Your access token expired. Please re-authenticate in Settings."

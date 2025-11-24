@@ -90,14 +90,59 @@ if 'code' in query_params and 'scope' in query_params:
             st.markdown("[← Go to Settings](/?page=⚙️+Settings)")
         else:
             st.error("❌ Failed to exchange authorization code for credentials.")
-            st.info("💡 Make sure you've installed the required packages: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+            
+            # Show more specific troubleshooting
+            st.markdown("### 🔍 Troubleshooting Steps:")
+            st.markdown("""
+            1. **Check Redirect URI**: Make sure the redirect URI in Google Cloud Console matches:
+               - For Streamlit Cloud: `https://reih-content-creator-4leuhlnaasfsjsxztqu5wj.streamlit.app/youtube_callback`
+               - For local: `http://localhost:8501/youtube_callback`
+            
+            2. **Verify Client Credentials**: Check that CLIENT_ID and CLIENT_SECRET are correct in Streamlit Secrets
+            
+            3. **Check Authorization Code**: The code may have expired. Try authenticating again.
+            
+            4. **Required Packages**: Make sure packages are installed (if running locally):
+            """)
+            st.code("pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+            
+            st.markdown("[← Go to Settings](/?page=⚙️+Settings)")
     except ImportError as e:
         st.error("❌ Required packages not installed.")
         st.info("💡 Please install: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
         st.code(f"pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+        st.markdown("[← Go to Settings](/?page=⚙️+Settings)")
     except Exception as e:
         st.error(f"❌ Error during authentication: {str(e)}")
-        st.exception(e)
+        
+        # Show more details for debugging
+        with st.expander("🔍 Error Details", expanded=False):
+            st.exception(e)
+        
+        # Common error messages
+        error_str = str(e).lower()
+        if 'redirect_uri_mismatch' in error_str:
+            st.warning("""
+            **Redirect URI Mismatch:**
+            - Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+            - Edit your OAuth 2.0 Client ID
+            - Add this redirect URI: `https://reih-content-creator-4leuhlnaasfsjsxztqu5wj.streamlit.app/youtube_callback`
+            """)
+        elif 'invalid_grant' in error_str:
+            st.warning("""
+            **Invalid Authorization Code:**
+            - The authorization code may have expired
+            - Try authenticating again from Settings
+            - Make sure you complete the OAuth flow in one session
+            """)
+        elif 'invalid_client' in error_str:
+            st.warning("""
+            **Invalid Client Credentials:**
+            - Check CLIENT_ID and CLIENT_SECRET in Streamlit Secrets
+            - Make sure they match your Google Cloud Console credentials
+            """)
+        
+        st.markdown("[← Go to Settings](/?page=⚙️+Settings)")
 elif 'error' in query_params:
     # OAuth error
     error = query_params.get('error', 'Unknown error')

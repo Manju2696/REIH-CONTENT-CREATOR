@@ -298,6 +298,26 @@ ACCESS_TOKEN = "paste-access-token-here"
                     is_authenticated = youtube_api_v2.is_youtube_authenticated()
                     if is_authenticated:
                         st.success("✅ YouTube account is authenticated")
+                        
+                        # Add test button to verify credentials work
+                        test_col1, test_col2 = st.columns(2)
+                        with test_col1:
+                            if st.button("🧪 Test YouTube Connection", key="test_youtube", use_container_width=True, help="Test if credentials work and can access YouTube API"):
+                                with st.spinner("Testing connection..."):
+                                    status = youtube_api_v2.check_youtube_account_status()
+                                    if status.get('success'):
+                                        st.success(f"✅ Connection successful! Channel: {status.get('channel_title', 'Unknown')}")
+                                    else:
+                                        error_msg = status.get('error', 'Unknown error')
+                                        st.error(f"❌ Connection failed: {error_msg}")
+                                        if 'permission' in error_msg.lower() or 'forbidden' in error_msg.lower():
+                                            st.info("""
+                                            **Common fixes for Permission Denied:**
+                                            1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials/consent)
+                                            2. Check OAuth consent screen - if in "Testing" mode, add your email as a test user
+                                            3. Verify YouTube Data API v3 is enabled
+                                            4. Re-authenticate and grant all permissions
+                                            """)
                     else:
                         st.warning("⚠️ YouTube account not authenticated. Complete OAuth flow below.")
                         oauth_url = youtube_api_v2.get_authorization_url()
@@ -314,8 +334,8 @@ ACCESS_TOKEN = "paste-access-token-here"
                                 st.warning(f"⚠️ Could not clear local token cache: {str(e)}")
                             st.info("YouTube tokens cleared. Click the authentication link below to connect again.")
                             st.rerun()
-                except:
-                    pass
+                except Exception as e:
+                    st.error(f"Error checking authentication: {str(e)}")
             else:
                 st.warning("⚠️ YouTube API not configured.")
             

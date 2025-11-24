@@ -15,7 +15,8 @@ from pages import (
     generate_scripts_page,
     upload_video_page,
     video_management_page,
-    settings_page
+    settings_page,
+    reimaginehome_tv_page
 )
 
 # Page configuration
@@ -215,7 +216,7 @@ with st.sidebar:
         # Decode URL-encoded page name
         import urllib.parse
         page_from_url = urllib.parse.unquote(page_from_url)
-        if page_from_url in ["📝 Generate Scripts", "📤 Upload Video", "📺 View All Videos", "⚙️ Settings"]:
+        if page_from_url in ["📝 Generate Scripts", "📤 Upload Video", "📺 View All Videos", "📺 REimagineHome TV", "⚙️ Settings"]:
             st.session_state.page = page_from_url
             # Clear the query param after using it
             try:
@@ -258,6 +259,19 @@ with st.sidebar:
                 type="primary" if st.session_state.page == "📺 View All Videos" else "secondary")
     if view_videos_clicked:
         st.session_state.page = "📺 View All Videos"
+        st.session_state.oauth_callback_processed = False  # Reset OAuth flag
+        # Clear any query params that might interfere
+        try:
+            st.query_params.clear()
+        except:
+            pass
+        st.rerun()
+    
+    # REimagineHome TV page
+    tv_clicked = st.button("📺 REimagineHome TV", key="nav_REimagineHome TV", use_container_width=True, 
+                type="primary" if st.session_state.page == "📺 REimagineHome TV" else "secondary")
+    if tv_clicked:
+        st.session_state.page = "📺 REimagineHome TV"
         st.session_state.oauth_callback_processed = False  # Reset OAuth flag
         # Clear any query params that might interfere
         try:
@@ -436,6 +450,8 @@ try:
         upload_video_page.show()
     elif st.session_state.page == "📺 View All Videos":
         video_management_page.show()
+    elif st.session_state.page == "📺 REimagineHome TV":
+        reimaginehome_tv_page.show()
     elif st.session_state.page == "⚙️ Settings":
         settings_page.show()
     else:

@@ -257,6 +257,10 @@ def init_db():
     db.master_prompts.create_index("is_active")
     db.master_prompts.create_index("name")
     
+    # YouTube TV videos collection
+    db.youtube_tv_videos.create_index("video_id", unique=True)
+    db.youtube_tv_videos.create_index("created_at")
+    
     print("Database initialized successfully!")
 
 def _get_consistent_id_hash(object_id) -> int:
