@@ -1,19 +1,4 @@
-"""
-YouTube API helper used across the app.
-
-This module handles:
-- OAuth flow (authorization URL + exchanging code)
-- Persisting tokens (Streamlit Cloud friendly)
-- Building an authenticated YouTube service
-- Uploading videos (including optional Cloudinary downloads + thumbnail upload)
-
-The implementation purposefully keeps a minimal surface area so that other
-parts of the app only care about:
-    - get_authorization_url()
-    - exchange_code_for_credentials(code)
-    - is_youtube_authenticated()
-    - upload_video_to_youtube(...)
-"""
+"""Fresh YouTube integration layer."""
 
 from __future__ import annotations
 
@@ -22,13 +7,12 @@ import os
 import tempfile
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import requests
 
 import database.db_setup as db
 
-# Google API imports
 try:
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import Flow
@@ -41,9 +25,6 @@ try:
 except ImportError:
     GOOGLE_LIBS_AVAILABLE = False
 
-# ---------------------------------------------------------------------------
-# Configuration helpers
-# ---------------------------------------------------------------------------
 
 SCOPES: List[str] = [
     "https://www.googleapis.com/auth/youtube.upload",
@@ -54,7 +35,12 @@ SCOPES: List[str] = [
 BASE_DIR = Path(__file__).resolve().parent.parent
 CREDENTIALS_DIR = BASE_DIR / "credentials"
 CREDENTIALS_DIR.mkdir(exist_ok=True)
-TOKEN_PATH = CREDENTIALS_DIR / "youtube_tokens.json"
+TOKEN_FILE = CREDENTIALS_DIR / "youtube_tokens.json"
+
+
+# -----------------------------------------------------------------------------
+# Environment helpers
+# -----------------------------------------------------------------------------
 
 
 def _is_streamlit_cloud() -> bool:
@@ -74,11 +60,9 @@ def _get_streamlit_secrets() -> Dict[str, Any]:
     try:
         import streamlit as st  # type: ignore
 
-        if hasattr(st, "secrets"):
-            return dict(st.secrets.get("YouTube", {})) or dict(st.secrets.get("youtube", {}))
+        return dict(st.secrets.get("YouTube") or st.secrets.get("youtube") or {})
     except Exception:
-        pass
-    return {}
+        return {}
 
 
 def get_redirect_uri() -> str:
@@ -86,45 +70,42 @@ def get_redirect_uri() -> str:
         streamlit_url = os.getenv("STREAMLIT_APP_URL")
         if streamlit_url:
             return f"{streamlit_url.rstrip('/')}/youtube_callback"
-        # default app URL
         return "https://reih-content-creator-4leuhlnaasfsjsxztqu5wj.streamlit.app/youtube_callback"
     return "http://localhost:8501/youtube_callback"
 
 
-def _get_client_credentials() -> Tuple[Optional[str], Optional[str]]:
+def _load_client_credentials() -> Optional[Dict[str, str]]:
     secrets = _get_streamlit_secrets()
     client_id = secrets.get("CLIENT_ID") or secrets.get("client_id")
     client_secret = secrets.get("CLIENT_SECRET") or secrets.get("client_secret")
 
-    if client_id and client_secret:
-        return client_id, client_secret
+    if not (client_id and client_secret):
+        client_id = os.getenv("YOUTUBE_CLIENT_ID", client_id)
+        client_secret = os.getenv("YOUTUBE_CLIENT_SECRET", client_secret)
 
-    # Fallback to env vars (local dev)
-    client_id = os.getenv("YOUTUBE_CLIENT_ID", client_id)
-    client_secret = os.getenv("YOUTUBE_CLIENT_SECRET", client_secret)
-
-    # Fallback to config.json
     config_file = BASE_DIR / "config.json"
     if (not client_id or not client_secret) and config_file.exists():
         try:
-            data = json.loads(config_file.read_text())
-            y_config = data.get("youtube", {})
-            client_id = y_config.get("client_id", client_id)
-            client_secret = y_config.get("client_secret", client_secret)
+            cfg = json.loads(config_file.read_text())
+            yt_cfg = cfg.get("youtube", {})
+            client_id = yt_cfg.get("client_id", client_id)
+            client_secret = yt_cfg.get("client_secret", client_secret)
         except Exception:
             pass
 
-    return client_id, client_secret
+    if client_id and client_secret:
+        return {"client_id": client_id, "client_secret": client_secret}
+    return None
 
 
-def _build_client_config() -> Optional[Dict[str, Any]]:
-    client_id, client_secret = _get_client_credentials()
-    if not client_id or not client_secret:
+def _client_config() -> Optional[Dict[str, Any]]:
+    creds = _load_client_credentials()
+    if not creds:
         return None
     return {
         "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [get_redirect_uri()],
@@ -132,36 +113,25 @@ def _build_client_config() -> Optional[Dict[str, Any]]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Token management
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Token helpers
+# -----------------------------------------------------------------------------
+
 
 def _load_local_tokens() -> Optional[Dict[str, Any]]:
-    if not TOKEN_PATH.exists():
+    if not TOKEN_FILE.exists():
         return None
     try:
-        return json.loads(TOKEN_PATH.read_text())
+        return json.loads(TOKEN_FILE.read_text())
     except Exception:
         return None
 
 
-def _save_local_tokens(creds: Credentials) -> None:
-    TOKEN_PATH.write_text(
-        json.dumps(
-            {
-                "token": creds.token,
-                "refresh_token": creds.refresh_token,
-                "token_uri": creds.token_uri,
-                "client_id": creds.client_id,
-                "client_secret": creds.client_secret,
-                "scopes": creds.scopes,
-            },
-            indent=2,
-        )
-    )
+def _save_local_tokens(data: Dict[str, Any]) -> None:
+    TOKEN_FILE.write_text(json.dumps(data, indent=2))
 
 
-def _load_streamlit_tokens() -> Dict[str, Any]:
+def _cloud_tokens() -> Dict[str, Any]:
     secrets = _get_streamlit_secrets()
     return {
         "token": secrets.get("ACCESS_TOKEN") or secrets.get("access_token"),
@@ -169,12 +139,7 @@ def _load_streamlit_tokens() -> Dict[str, Any]:
     }
 
 
-def _store_streamlit_tokens(creds: Credentials) -> None:
-    """
-    Streamlit Cloud can't write to secrets, so we keep fresh tokens in session
-    state for the user to copy. The Settings page already checks
-    `st.session_state.youtube_new_tokens`.
-    """
+def _stash_tokens_for_user(creds: Credentials) -> None:
     try:
         import streamlit as st  # type: ignore
 
@@ -187,64 +152,24 @@ def _store_streamlit_tokens(creds: Credentials) -> None:
         pass
 
 
-def _build_credentials_from_tokens(tokens: Dict[str, Any]) -> Optional[Credentials]:
-    if not tokens:
-        return None
-
-    client_id, client_secret = _get_client_credentials()
-    if not client_id or not client_secret:
-        return None
-
-    try:
-        creds = Credentials(
-            token=tokens.get("token"),
-            refresh_token=tokens.get("refresh_token"),
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=client_id,
-            client_secret=client_secret,
-            scopes=SCOPES,
-        )
-        return creds
-    except Exception:
-        return None
-
-
-def _load_credentials() -> Optional[Credentials]:
-    if not GOOGLE_LIBS_AVAILABLE:
-        return None
-
-    creds = None
-    if _is_streamlit_cloud():
-        tokens = _load_streamlit_tokens()
-        creds = _build_credentials_from_tokens(tokens)
-    else:
-        tokens = _load_local_tokens()
-        if tokens:
-            creds = Credentials.from_authorized_user_info(tokens, SCOPES)
-
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            if _is_streamlit_cloud():
-                _store_streamlit_tokens(creds)
-            else:
-                _save_local_tokens(creds)
-        except Exception:
-            return None
-
-    return creds
-
-
 def _persist_credentials(creds: Credentials) -> None:
+    data = {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": creds.scopes,
+    }
     if _is_streamlit_cloud():
-        _store_streamlit_tokens(creds)
+        _stash_tokens_for_user(creds)
     else:
-        _save_local_tokens(creds)
+        _save_local_tokens(data)
 
 
 def clear_credentials() -> bool:
-    if TOKEN_PATH.exists():
-        TOKEN_PATH.unlink()
+    if TOKEN_FILE.exists():
+        TOKEN_FILE.unlink()
     try:
         import streamlit as st  # type: ignore
 
@@ -255,36 +180,74 @@ def clear_credentials() -> bool:
     return True
 
 
-# ---------------------------------------------------------------------------
-# OAuth helpers
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# OAuth entry points
+# -----------------------------------------------------------------------------
+
 
 def get_authorization_url() -> Optional[str]:
     if not GOOGLE_LIBS_AVAILABLE:
         return None
-
-    config = _build_client_config()
+    config = _client_config()
     if not config:
         return None
-
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=get_redirect_uri())
     url, _ = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
     return url
 
 
-def exchange_code_for_credentials(auth_code: str) -> Optional[Credentials]:
+def exchange_code_for_credentials(code: str) -> Optional[Credentials]:
     if not GOOGLE_LIBS_AVAILABLE:
         return None
-
-    config = _build_client_config()
+    config = _client_config()
     if not config:
         return None
-
     flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=get_redirect_uri())
-    flow.fetch_token(code=auth_code)
+    flow.fetch_token(code=code)
     creds = flow.credentials
     if creds:
         _persist_credentials(creds)
+    return creds
+
+
+# -----------------------------------------------------------------------------
+# Credential access / YouTube service
+# -----------------------------------------------------------------------------
+
+
+def _build_creds_from_info(info: Dict[str, Any]) -> Optional[Credentials]:
+    client = _load_client_credentials()
+    if not client:
+        return None
+    try:
+        return Credentials(
+            token=info.get("token"),
+            refresh_token=info.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client["client_id"],
+            client_secret=client["client_secret"],
+            scopes=SCOPES,
+        )
+    except Exception:
+        return None
+
+
+def _load_credentials() -> Optional[Credentials]:
+    if not GOOGLE_LIBS_AVAILABLE:
+        return None
+
+    if _is_streamlit_cloud():
+        creds = _build_creds_from_info(_cloud_tokens())
+    else:
+        info = _load_local_tokens()
+        creds = Credentials.from_authorized_user_info(info, SCOPES) if info else None
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            _persist_credentials(creds)
+        except Exception:
+            return None
     return creds
 
 
@@ -298,39 +261,38 @@ def is_youtube_authenticated() -> bool:
 
 
 def get_youtube_service():
-    if not GOOGLE_LIBS_AVAILABLE:
-        return None
     creds = get_credentials()
     if not creds:
         return None
     return build("youtube", "v3", credentials=creds)
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Upload helpers
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-def _download_remote_file(url: str, suffix: str) -> Tuple[Optional[str], Optional[str]]:
+
+def _download_temp(url: str, suffix: str) -> Optional[str]:
     try:
         response = requests.get(url, stream=True, timeout=300)
         response.raise_for_status()
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
-                temp_file.write(chunk)
-        temp_file.close()
-        return temp_file.name, temp_file.name
+                temp.write(chunk)
+        temp.close()
+        return temp.name
     except Exception:
-        return None, None
+        return None
 
 
-def _tags_from_keywords(keywords: Any) -> List[str]:
+def _prepare_tags(keywords: Any) -> List[str]:
     if not keywords or keywords == "N/A":
         return []
     if isinstance(keywords, str):
-        return [t.strip() for t in keywords.split(",") if t.strip()]
+        return [tag.strip() for tag in keywords.split(",") if tag.strip()]
     if isinstance(keywords, list):
-        return [str(t).strip() for t in keywords if t]
+        return [str(tag).strip() for tag in keywords if tag]
     return []
 
 
@@ -343,9 +305,6 @@ def upload_video_to_youtube(
     privacy_status: str = "unlisted",
     thumbnail_file_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Upload a video to YouTube with the provided metadata.
-    """
     if not GOOGLE_LIBS_AVAILABLE:
         return {"success": False, "error": "Google API libraries not installed."}
 
@@ -353,27 +312,22 @@ def upload_video_to_youtube(
     if not youtube:
         return {"success": False, "error": "YouTube account not authenticated."}
 
-    # Validate file or download if remote
-    is_remote = isinstance(video_file_path, str) and video_file_path.startswith("http")
     temp_video = None
-    if is_remote:
-        temp_video, video_path = _download_remote_file(video_file_path, ".mp4")
-    else:
-        video_path = video_file_path
+    usable_path = video_file_path
+    if isinstance(video_file_path, str) and video_file_path.startswith("http"):
+        temp_video = _download_temp(video_file_path, ".mp4")
+        usable_path = temp_video
 
-    if not video_path or (not is_remote and not os.path.exists(video_path)):
+    if not usable_path or not os.path.exists(usable_path):
         return {"success": False, "error": "Video file not found."}
 
-    title = (title or "").strip()[:100]
+    title = (title or "Untitled Video").strip()[:100]
     description = (description or "").strip()[:5000]
-    final_tags = tags if tags is not None else []
-
-    if not final_tags:
-        final_tags = _tags_from_keywords(tags)
+    tag_list = tags if tags is not None else _prepare_tags(tags)
 
     body = {
         "snippet": {
-            "title": title or "Untitled Video",
+            "title": title,
             "description": description,
             "categoryId": category_id or "22",
         },
@@ -382,17 +336,17 @@ def upload_video_to_youtube(
             "selfDeclaredMadeForKids": False,
         },
     }
-    if final_tags:
-        body["snippet"]["tags"] = final_tags[:10]
+    if tag_list:
+        body["snippet"]["tags"] = tag_list[:10]
 
-    media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/*")
-
-    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+    media = MediaFileUpload(usable_path, chunksize=-1, resumable=True, mimetype="video/*")
 
     try:
+        request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
         response = None
         while response is None:
             _, response = request.next_chunk()
+
         video_id = response.get("id")
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -400,15 +354,14 @@ def upload_video_to_youtube(
             _upload_thumbnail(youtube, video_id, thumbnail_file_path)
 
         track_youtube_upload_success()
-
         return {"success": True, "video_id": video_id, "video_url": video_url}
     except HttpError as error:
         if error.resp.status in (401, 403):
             return {
                 "success": False,
-                "error": "Permission denied. Make sure you granted all YouTube scopes and your account has a YouTube channel.",
+                "error": "Permission denied. Re-run authentication and ensure your Google account has a YouTube channel.",
             }
-        return {"success": False, "error": f"YouTube API error: {error}"}
+        return {"success": False, "error": f"YouTube API Error: {error}"}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
     finally:
@@ -417,16 +370,16 @@ def upload_video_to_youtube(
 
 
 def _upload_thumbnail(youtube, video_id: str, thumbnail_path: str) -> None:
-    """Upload thumbnail image for a video."""
+    temp_thumb = None
+    path_to_use = thumbnail_path
+    if thumbnail_path and thumbnail_path.startswith("http"):
+        temp_thumb = _download_temp(thumbnail_path, ".jpg")
+        path_to_use = temp_thumb
+
+    if not path_to_use or not os.path.exists(path_to_use):
+        return
+
     try:
-        path_to_use = thumbnail_path
-        temp_thumb = None
-        if thumbnail_path.startswith("http"):
-            temp_thumb, path_to_use = _download_remote_file(thumbnail_path, ".jpg")
-
-        if not path_to_use or not os.path.exists(path_to_use):
-            return
-
         youtube.thumbnails().set(
             videoId=video_id,
             media_body=MediaFileUpload(path_to_use, mimetype="image/jpeg", resumable=False),
@@ -438,20 +391,17 @@ def _upload_thumbnail(youtube, video_id: str, thumbnail_path: str) -> None:
             os.unlink(temp_thumb)
 
 
-# ---------------------------------------------------------------------------
-# Lightweight account + quota helpers (kept for compatibility)
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Account / quota helpers
+# -----------------------------------------------------------------------------
+
 
 def check_youtube_account_status() -> Dict[str, Any]:
     youtube = get_youtube_service()
     if not youtube:
         return {"error": "Not authenticated."}
     try:
-        resp = (
-            youtube.channels()
-            .list(part="snippet,statistics", mine=True)
-            .execute()
-        )
+        resp = youtube.channels().list(part="snippet,statistics", mine=True).execute()
         if resp.get("items"):
             channel = resp["items"][0]
             return {
@@ -461,7 +411,7 @@ def check_youtube_account_status() -> Dict[str, Any]:
                 "subscriber_count": channel.get("statistics", {}).get("subscriberCount"),
                 "video_count": channel.get("statistics", {}).get("videoCount"),
             }
-        return {"error": "No YouTube channel found for this account."}
+        return {"error": "YouTube channel not found for this account."}
     except HttpError as error:
         return {"error": f"YouTube API error: {error}"}
 
@@ -469,20 +419,19 @@ def check_youtube_account_status() -> Dict[str, Any]:
 def track_youtube_upload_success() -> None:
     try:
         today = date.today().isoformat()
-        record = db.execute_query(
-            """
-            SELECT id, upload_count FROM youtube_upload_tracking WHERE upload_date = ?
-        """,
-            (today,),
+        existing = db.execute_query(
+            "SELECT id FROM youtube_upload_tracking WHERE upload_date = ?", (today,)
         )
-        if record:
+        if existing:
             db.execute_update(
                 """
                 UPDATE youtube_upload_tracking
-                SET upload_count = upload_count + 1, last_upload_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                SET upload_count = upload_count + 1,
+                    last_upload_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """,
-                (record[0]["id"],),
+                (existing[0]["id"],),
             )
         else:
             db.execute_insert(
@@ -503,7 +452,8 @@ def track_youtube_upload_limit_reached() -> None:
             """
             INSERT INTO youtube_upload_tracking (upload_date, upload_count, daily_limit, created_at, updated_at)
             VALUES (?, 6, 6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT(upload_date) DO UPDATE SET upload_count = 6, updated_at = CURRENT_TIMESTAMP
+            ON CONFLICT(upload_date)
+            DO UPDATE SET upload_count = 6, updated_at = CURRENT_TIMESTAMP
         """,
             (today,),
         )
@@ -514,7 +464,7 @@ def track_youtube_upload_limit_reached() -> None:
 def get_youtube_upload_status() -> Dict[str, Any]:
     try:
         today = date.today().isoformat()
-        result = db.execute_query(
+        record = db.execute_query(
             """
             SELECT upload_count, daily_limit, last_upload_at
             FROM youtube_upload_tracking
@@ -522,17 +472,17 @@ def get_youtube_upload_status() -> Dict[str, Any]:
         """,
             (today,),
         )
-        if result:
-            record = result[0]
-            limit = record.get("daily_limit", 6) or 6
-            count = record.get("upload_count", 0) or 0
+        if record:
+            data = record[0]
+            limit = data.get("daily_limit", 6) or 6
+            count = data.get("upload_count", 0) or 0
             return {
                 "today": today,
                 "upload_count": count,
                 "daily_limit": limit,
                 "remaining": max(0, limit - count),
                 "limit_reached": count >= limit,
-                "last_upload_at": record.get("last_upload_at"),
+                "last_upload_at": data.get("last_upload_at"),
             }
         return {
             "today": today,
@@ -551,919 +501,4 @@ def get_youtube_upload_status() -> Dict[str, Any]:
             "limit_reached": False,
             "error": str(exc),
         }
-
-def get_credentials() -> Optional[Credentials]:
-    """
-    Get valid user credentials from Streamlit Secrets (cloud) or pickle file (local)
-    On Streamlit Cloud, reads tokens from Streamlit Secrets, not files
-    """
-    if not LIBRARIES_AVAILABLE:
-        return None
-    
-    # Check if running on Streamlit Cloud
-    is_streamlit_cloud = False
-    st = None
-    try:
-        import streamlit as st
-        if hasattr(st, 'secrets') and st.secrets:
-            is_streamlit_cloud = True
-    except:
-        pass
-    
-    if is_streamlit_cloud:
-        # On Streamlit Cloud: Load from Streamlit Secrets (or session state as fallback)
-        import config
-        youtube_creds = config.get_youtube_credentials()
-        if not youtube_creds:
-            return None
-        
-        client_id = youtube_creds.get('client_id')
-        client_secret = youtube_creds.get('client_secret')
-        refresh_token = youtube_creds.get('refresh_token')
-        access_token = youtube_creds.get('access_token')
-        
-        # Check session state for new tokens (from OAuth callback)
-        try:
-            if st and hasattr(st, 'session_state') and 'youtube_new_tokens' in st.session_state:
-                new_tokens = st.session_state.youtube_new_tokens
-                if new_tokens and new_tokens.get('refresh_token'):
-                    refresh_token = new_tokens.get('refresh_token')
-                if new_tokens and new_tokens.get('access_token'):
-                    access_token = new_tokens.get('access_token')
-        except:
-            pass
-        
-        if not client_id or not client_secret:
-            return None
-        
-        # Build credentials object from tokens
-        try:
-            from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import Flow
-            from google.auth.transport.requests import Request
-            
-            creds = None
-            if refresh_token:
-                # Create credentials from refresh token
-                # If access_token is empty/None, create without it (will be refreshed)
-                creds = Credentials(
-                    token=access_token if access_token else None,
-                    refresh_token=refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    scopes=SCOPES  # Explicitly set scopes
-                )
-                
-                # Refresh if expired or if token is None
-                if (creds.expired or not creds.token) and creds.refresh_token:
-                    try:
-                        creds.refresh(Request())
-                        # Update access token in Streamlit Secrets (user needs to do this manually)
-                        # For now, token works in memory for current session
-                        print(f"Credentials refreshed successfully")
-                    except Exception as e:
-                        print(f"Error refreshing credentials: {e}")
-                        # If refresh fails, return None to force re-authentication
-                        return None
-            elif access_token:
-                # Use access token directly (will expire, but works for now)
-                creds = Credentials(
-                    token=access_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=client_id,
-                    client_secret=client_secret
-                )
-            
-            return creds
-        except Exception as e:
-            print(f"Error creating credentials from Streamlit Secrets: {e}")
-            return None
-    else:
-        # Local development: Load from pickle file
-        creds = None
-        token_file = get_credentials_file_path()
-        
-        # Load existing credentials
-        if os.path.exists(token_file):
-            try:
-                with open(token_file, 'rb') as token:
-                    creds = pickle.load(token)
-            except Exception as e:
-                print(f"Error loading credentials: {e}")
-        
-        # If there are no (valid) credentials available, return None
-        if not creds or not creds.valid:
-            # If credentials are expired, try to refresh
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                    # Save refreshed credentials
-                    with open(token_file, 'wb') as token:
-                        pickle.dump(creds, token)
-                    return creds
-                except Exception as e:
-                    print(f"Error refreshing credentials: {e}")
-                    return None
-        
-        return creds
-
-def save_credentials(creds: Credentials):
-    """
-    Save credentials to Streamlit Secrets (cloud) or pickle file (local)
-    On Streamlit Cloud, tokens are saved to Streamlit Secrets, not files
-    """
-    if not LIBRARIES_AVAILABLE:
-        return False
-    
-    try:
-        # Check if running on Streamlit Cloud
-        is_streamlit_cloud = False
-        try:
-            import streamlit as st
-            if hasattr(st, 'secrets') and st.secrets:
-                is_streamlit_cloud = True
-        except:
-            pass
-        
-        if is_streamlit_cloud:
-            # On Streamlit Cloud: Store tokens in session state and return them for user to copy
-            import config
-            refresh_token = creds.refresh_token if creds.refresh_token else None
-            access_token = creds.token if creds.token else None
-            
-            # Get existing client_id and client_secret to preserve them
-            youtube_creds = config.get_youtube_credentials()
-            if youtube_creds:
-                # Store tokens in session state so they can be displayed to user
-                try:
-                    import streamlit as st
-                    if 'youtube_new_tokens' not in st.session_state:
-                        st.session_state.youtube_new_tokens = {}
-                    st.session_state.youtube_new_tokens = {
-                        'refresh_token': refresh_token,
-                        'access_token': access_token,
-                        'timestamp': datetime.now().isoformat()
-                    }
-                except:
-                    pass
-                # Return True to indicate tokens were obtained (user needs to copy to Secrets)
-                return True
-        else:
-            # Local development: Save to pickle file
-            token_file = get_credentials_file_path()
-            with open(token_file, 'wb') as token:
-                pickle.dump(creds, token)
-            return True
-    except Exception as e:
-        print(f"Error saving credentials: {e}")
-        return False
-
-def get_authorization_url() -> Optional[str]:
-    """Get OAuth authorization URL"""
-    if not LIBRARIES_AVAILABLE:
-        return None
-    
-    client_config = get_client_config()
-    if not client_config:
-        return None
-    
-    try:
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=SCOPES,
-            redirect_uri=get_redirect_uri()
-        )
-        authorization_url, _ = flow.authorization_url(
-            access_type='offline',
-            include_granted_scopes='true',
-            prompt='consent'
-        )
-        return authorization_url
-    except Exception as e:
-        print(f"Error creating authorization URL: {e}")
-        return None
-
-def exchange_code_for_credentials(authorization_code: str) -> Optional[Credentials]:
-    """Exchange authorization code for credentials"""
-    if not LIBRARIES_AVAILABLE:
-        print("Error: Google API libraries not available")
-        return None
-    
-    client_config = get_client_config()
-    if not client_config:
-        print("Error: Could not get client configuration. Check CLIENT_ID and CLIENT_SECRET in Secrets.")
-        return None
-    
-    redirect_uri = get_redirect_uri()
-    print(f"Using redirect URI: {redirect_uri}")
-    
-    try:
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=SCOPES,
-            redirect_uri=redirect_uri
-        )
-        flow.fetch_token(code=authorization_code)
-        creds = flow.credentials
-        
-        if not creds:
-            print("Error: No credentials returned from token exchange")
-            return None
-        
-        # Save credentials
-        if save_credentials(creds):
-            print("Credentials saved successfully")
-            return creds
-        else:
-            print("Warning: Credentials obtained but could not be saved (this is OK on Streamlit Cloud)")
-            # Return creds anyway - they're in memory and can be displayed to user
-            return creds
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Error exchanging code for credentials: {error_msg}")
-        print(f"Error type: {type(e).__name__}")
-        
-        # Provide more specific error messages
-        if 'redirect_uri_mismatch' in error_msg.lower():
-            print("ERROR: Redirect URI mismatch. Check Google Cloud Console authorized redirect URIs.")
-        elif 'invalid_grant' in error_msg.lower():
-            print("ERROR: Invalid authorization code. Code may have expired or been used already.")
-        elif 'invalid_client' in error_msg.lower():
-            print("ERROR: Invalid client credentials. Check CLIENT_ID and CLIENT_SECRET in Secrets.")
-        
-        return None
-
-def get_youtube_service() -> Optional[Any]:
-    """Get authenticated YouTube service object"""
-    if not LIBRARIES_AVAILABLE:
-        return None
-    
-    creds = get_credentials()
-    if not creds:
-        return None
-    
-    try:
-        service = build('youtube', 'v3', credentials=creds)
-        return service
-    except Exception as e:
-        print(f"Error building YouTube service: {e}")
-        return None
-
-def upload_video_to_youtube(
-    video_file_path: str,
-    title: str,
-    description: str = "",
-    tags: list = None,
-    category_id: str = "22",
-    privacy_status: str = "unlisted",
-    thumbnail_file_path: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Upload video to YouTube using Google API client library
-    
-    Args:
-        video_file_path: Path to video file
-        title: Video title (required, max 100 chars)
-        description: Video description (optional, max 5000 chars)
-        tags: List of tags (optional, max 10 tags)
-        category_id: YouTube category ID (default: 22 for People & Blogs)
-        privacy_status: public, unlisted, or private (default: unlisted)
-        thumbnail_file_path: Path to thumbnail image file (optional, supports Cloudinary URLs)
-    
-    Returns:
-        Dict with 'success' (bool), 'video_id', 'video_url', or 'error'
-    """
-    if not LIBRARIES_AVAILABLE:
-        return {
-            "error": "Google API libraries not installed. Please install: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib"
-        }
-    
-    # Check if video_file_path is a Cloudinary URL or local file
-    is_cloudinary_url = isinstance(video_file_path, str) and 'res.cloudinary.com' in video_file_path
-    
-    # Validate inputs
-    if not video_file_path:
-        return {"error": "Video file path is required"}
-    
-    # For local files, check if they exist
-    if not is_cloudinary_url and not os.path.exists(video_file_path):
-        return {"error": f"Video file not found: {video_file_path}"}
-    
-    if not title or not title.strip():
-        return {"error": "Title is required and cannot be empty"}
-    
-    # Sanitize and validate title
-    title = title.strip()[:100]  # YouTube limit is 100 characters
-    if not title:
-        return {"error": "Title is required and cannot be empty after sanitization"}
-    
-    # Sanitize description
-    description = (description or "").strip()[:5000]  # YouTube limit is 5000 characters
-    
-    # Validate and sanitize tags
-    valid_tags = []
-    if tags:
-        for tag in tags[:10]:  # YouTube allows max 10 tags
-            if tag and isinstance(tag, str):
-                tag = tag.strip()
-                if tag and len(tag) <= 500:  # Each tag max 500 chars
-                    valid_tags.append(tag)
-    
-    # Validate category ID
-    try:
-        category_id_int = int(category_id)
-        if category_id_int < 1 or category_id_int > 29:
-            category_id = "22"  # Default to People & Blogs
-        else:
-            category_id = str(category_id_int)
-    except (ValueError, TypeError):
-        category_id = "22"
-    
-    # Validate privacy status
-    if privacy_status not in ["public", "private", "unlisted"]:
-        privacy_status = "unlisted"  # Default to unlisted
-    
-    # Check daily upload limit before attempting upload
-    upload_status = get_youtube_upload_status()
-    if upload_status.get('limit_reached', False):
-        return {
-            "error": "Daily upload limit reached",
-            "message": f"You've reached your daily YouTube upload limit ({upload_status.get('daily_limit', 6)} videos). You've uploaded {upload_status.get('upload_count', 0)} video(s) today. Try again tomorrow or verify your account to increase the limit to 15 videos per day."
-        }
-    
-    # Get YouTube service
-    youtube = get_youtube_service()
-    if not youtube:
-        return {"error": "Not authenticated. Please authenticate your YouTube account in Settings."}
-    
-    # Validate credentials before upload - test with a simple API call
-    try:
-        # Test credentials by getting channel info
-        test_response = youtube.channels().list(part='id', mine=True).execute()
-        if not test_response.get('items'):
-            return {
-                "error": "Permission denied",
-                "message": "Your account doesn't have a YouTube channel. Please create a YouTube channel first at youtube.com"
-            }
-    except HttpError as e:
-        if e.resp.status == 403:
-            return {
-                "error": "Permission denied",
-                "message": (
-                    "Permission denied when accessing YouTube API. Common causes:\n"
-                    "1. OAuth consent screen is in 'Testing' mode - Add your email as a test user in Google Cloud Console\n"
-                    "2. YouTube Data API v3 is not enabled - Enable it in Google Cloud Console\n"
-                    "3. OAuth scope 'youtube.upload' was not granted - Re-authenticate and grant all permissions\n"
-                    "4. Your Google account doesn't have a YouTube channel - Create one at youtube.com"
-                )
-            }
-        elif e.resp.status == 401:
-            return {
-                "error": "Authentication failed",
-                "message": "Your access token expired. Please re-authenticate in Settings."
-            }
-        else:
-            return {
-                "error": f"YouTube API Error: {e.resp.status}",
-                "message": str(e)
-            }
-    except Exception as e:
-        # If test fails for other reasons, continue with upload attempt
-        print(f"Warning: Could not validate credentials before upload: {str(e)}")
-    
-    # Handle Cloudinary URLs - download to temporary file first
-    temp_file_path = None
-    actual_video_path = video_file_path
-    
-    if is_cloudinary_url:
-        if not REQUESTS_AVAILABLE:
-            return {"error": "requests library not installed. Please install it with: pip install requests"}
-        
-        try:
-            print(f"[INFO] Downloading video from Cloudinary URL: {video_file_path[:80]}...")
-            
-            # Download video from Cloudinary URL
-            response = requests.get(video_file_path, stream=True, timeout=300)  # 5 minute timeout for large videos
-            if response.status_code != 200:
-                return {"error": f"Failed to download video from Cloudinary: HTTP {response.status_code}"}
-            
-            # Save to temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        temp_file.write(chunk)
-                temp_file_path = temp_file.name
-            
-            actual_video_path = temp_file_path
-            print(f"[INFO] Downloaded video to temporary file: {temp_file_path}")
-            
-        except Exception as e:
-            return {"error": f"Failed to download video from Cloudinary: {str(e)}"}
-    
-    try:
-        # Build video metadata
-        body = {
-            'snippet': {
-                'title': title,
-                'description': description,
-                'categoryId': category_id
-            },
-            'status': {
-                'privacyStatus': privacy_status,
-                'selfDeclaredMadeForKids': False  # Set to False - video is NOT made for kids
-            }
-        }
-        
-        # Add tags if provided
-        if valid_tags:
-            body['snippet']['tags'] = valid_tags
-        
-        # Create media file upload object
-        media = MediaFileUpload(
-            actual_video_path,
-            chunksize=-1,
-            resumable=True,
-            mimetype='video/*'
-        )
-        
-        # Insert video - explicitly include 'snippet' and 'status' parts
-        # This ensures both metadata and madeForKids setting are included
-        insert_request = youtube.videos().insert(
-            part='snippet,status',  # Explicitly include both parts
-            body=body,
-            media_body=media
-        )
-        
-        # Execute upload with progress tracking
-        response = None
-        error = None
-        retry = 0
-        while response is None:
-            try:
-                status, response = insert_request.next_chunk()
-                if response is not None:
-                    if 'id' in response:
-                        video_id = response['id']
-                        video_url = f"https://www.youtube.com/watch?v={video_id}"
-                        
-                        # Upload thumbnail if provided
-                        thumbnail_uploaded = False
-                        if thumbnail_file_path:
-                            try:
-                                thumbnail_result = upload_thumbnail_to_youtube(
-                                    youtube=youtube,
-                                    video_id=video_id,
-                                    thumbnail_file_path=thumbnail_file_path
-                                )
-                                if thumbnail_result.get('success'):
-                                    thumbnail_uploaded = True
-                                    print(f"[INFO] Thumbnail uploaded successfully for video {video_id}")
-                                else:
-                                    print(f"[WARNING] Failed to upload thumbnail: {thumbnail_result.get('error', 'Unknown error')}")
-                            except Exception as e:
-                                print(f"[WARNING] Error uploading thumbnail: {str(e)}")
-                        
-                        return {
-                            "success": True,
-                            "video_id": video_id,
-                            "video_url": video_url,
-                            "title": title,
-                            "thumbnail_uploaded": thumbnail_uploaded
-                        }
-                    else:
-                        return {
-                            "error": "Upload successful but no video ID returned",
-                            "response": response
-                        }
-            except HttpError as e:
-                error = e
-                # Don't retry on client errors (4xx), break immediately
-                # Server errors (5xx) can be retried
-                if e.resp.status in [500, 502, 503, 504]:
-                    # Retry on server errors
-                    retry += 1
-                    if retry > 3:
-                        break
-                    continue
-                else:
-                    # Don't retry on client errors - break and handle below
-                    break
-        
-        # Handle errors
-        if error:
-            error_details = {
-                "error": f"YouTube API Error: {error.resp.status}",
-                "message": str(error)
-            }
-            
-            try:
-                error_content = json.loads(error.content.decode('utf-8'))
-                if 'error' in error_content:
-                    error_info = error_content['error']
-                    error_details['message'] = error_info.get('message', str(error))
-                    error_details['errors'] = error_info.get('errors', [])
-                    
-                    # Extract specific error reasons
-                    reasons = []
-                    for err in error_info.get('errors', []):
-                        reason = err.get('reason', '')
-                        if reason:
-                            reasons.append(reason)
-                    
-                    # Check for daily upload limit
-                    error_message_lower = error_info.get('message', '').lower()
-                    error_message = error_info.get('message', '')
-                    
-                    # Check various patterns for daily upload limit
-                    is_daily_limit = (
-                        'uploadLimitExceeded' in reasons or 
-                        'dailyUploadLimitExceeded' in reasons or
-                        'daily upload limit' in error_message_lower or
-                        'dailyUploadLimit' in error_message or
-                        'upload limit' in error_message_lower
-                    )
-                    
-                    # Check for quota exceeded (might be daily limit or API quota)
-                    is_quota_exceeded = (
-                        'quotaexceeded' in reasons or 
-                        'quotaExceeded' in reasons or
-                        'quota exceeded' in error_message_lower
-                    )
-                    
-                    if is_daily_limit or (is_quota_exceeded and 'daily' in error_message_lower):
-                        error_details['error'] = "Daily upload limit reached"
-                        upload_status = get_youtube_upload_status()
-                        daily_limit = upload_status.get('daily_limit', 6)
-                        upload_count = upload_status.get('upload_count', 0)
-                        error_details['message'] = f"You've reached your daily YouTube upload limit ({daily_limit} videos). You've uploaded {upload_count} video(s) today. Try again tomorrow or verify your account to increase the limit to 15 videos per day."
-                        # Track the limit reached (if not already at limit, set it to limit)
-                        track_youtube_upload_limit_reached()
-                    elif 'forbidden' in reasons or error.resp.status == 403:
-                        error_details['error'] = "Permission denied"
-                        # Provide more specific error message
-                        if 'insufficient permission' in error_message_lower or 'permission' in error_message_lower:
-                            error_details['message'] = (
-                                "Permission denied. This usually means:\n"
-                                "1. Your OAuth consent screen is in 'Testing' mode - Add your email as a test user in Google Cloud Console\n"
-                                "2. YouTube Data API v3 is not enabled - Enable it in Google Cloud Console\n"
-                                "3. The OAuth scope 'youtube.upload' was not granted - Re-authenticate and make sure to grant all permissions\n"
-                                "4. Your Google account doesn't have a YouTube channel - Create a YouTube channel first"
-                            )
-                        else:
-                            error_details['message'] = f"Permission denied: {error_message}. Check YouTube API permissions and OAuth scopes."
-                    elif 'unauthorized' in reasons or error.resp.status == 401:
-                        error_details['error'] = "Authentication failed"
-                        error_details['message'] = "Your access token expired. Please re-authenticate in Settings."
-            except:
-                pass
-            
-            return error_details
-        
-        return {"error": "Upload failed with unknown error"}
-    
-    except Exception as e:
-        return {
-            "error": f"Error uploading video: {str(e)}"
-        }
-    finally:
-        # Clean up temporary file if it was created (for Cloudinary URLs)
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-                print(f"[INFO] Cleaned up temporary file: {temp_file_path}")
-            except Exception as e:
-                print(f"[WARNING] Could not delete temporary file: {str(e)}")
-
-def upload_thumbnail_to_youtube(
-    youtube: Any,
-    video_id: str,
-    thumbnail_file_path: str
-) -> Dict[str, Any]:
-    """
-    Upload thumbnail image to YouTube video
-    
-    Args:
-        youtube: YouTube service object
-        video_id: YouTube video ID
-        thumbnail_file_path: Path to thumbnail image file (supports Cloudinary URLs)
-    
-    Returns:
-        Dict with 'success' (bool) and 'error' (if failed)
-    """
-    try:
-        # Check if thumbnail_file_path is a Cloudinary URL or local file
-        is_cloudinary_url = isinstance(thumbnail_file_path, str) and 'res.cloudinary.com' in thumbnail_file_path
-        
-        # Validate thumbnail file
-        if not thumbnail_file_path:
-            return {"success": False, "error": "Thumbnail file path is required"}
-        
-        # For local files, check if they exist
-        if not is_cloudinary_url and not os.path.exists(thumbnail_file_path):
-            return {"success": False, "error": f"Thumbnail file not found: {thumbnail_file_path}"}
-        
-        # Handle Cloudinary URLs - download to temporary file first
-        temp_thumbnail_path = None
-        actual_thumbnail_path = thumbnail_file_path
-        
-        if is_cloudinary_url:
-            if not REQUESTS_AVAILABLE:
-                return {"success": False, "error": "requests library not installed. Please install it with: pip install requests"}
-            
-            try:
-                print(f"[INFO] Downloading thumbnail from Cloudinary URL: {thumbnail_file_path[:80]}...")
-                
-                # Download thumbnail from Cloudinary URL
-                response = requests.get(thumbnail_file_path, stream=True, timeout=60)  # 1 minute timeout
-                if response.status_code != 200:
-                    return {"success": False, "error": f"Failed to download thumbnail from Cloudinary: HTTP {response.status_code}"}
-                
-                # Save to temporary file
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            temp_file.write(chunk)
-                    temp_thumbnail_path = temp_file.name
-                
-                actual_thumbnail_path = temp_thumbnail_path
-                print(f"[INFO] Downloaded thumbnail to temporary file: {temp_thumbnail_path}")
-                
-            except Exception as e:
-                return {"success": False, "error": f"Failed to download thumbnail from Cloudinary: {str(e)}"}
-        
-        try:
-            # Upload thumbnail using YouTube API
-            youtube.thumbnails().set(
-                videoId=video_id,
-                media_body=MediaFileUpload(actual_thumbnail_path, mimetype='image/jpeg', resumable=False)
-            ).execute()
-            
-            return {"success": True}
-            
-        except HttpError as e:
-            error_details = {
-                "success": False,
-                "error": f"YouTube API Error: {e.resp.status}",
-                "message": str(e)
-            }
-            
-            try:
-                error_content = json.loads(e.content.decode('utf-8'))
-                if 'error' in error_content:
-                    error_info = error_content['error']
-                    error_details['message'] = error_info.get('message', str(e))
-            except:
-                pass
-            
-            return error_details
-            
-        except Exception as e:
-            return {"success": False, "error": f"Error uploading thumbnail: {str(e)}"}
-            
-        finally:
-            # Clean up temporary file if it was created
-            if temp_thumbnail_path and os.path.exists(temp_thumbnail_path):
-                try:
-                    os.unlink(temp_thumbnail_path)
-                    print(f"[INFO] Cleaned up temporary thumbnail file: {temp_thumbnail_path}")
-                except Exception as e:
-                    print(f"[WARNING] Error cleaning up temporary thumbnail file {temp_thumbnail_path}: {str(e)}")
-    
-    except Exception as e:
-        # Clean up temporary file if it was created (in case of exception before upload)
-        if temp_thumbnail_path and os.path.exists(temp_thumbnail_path):
-            try:
-                os.unlink(temp_thumbnail_path)
-                print(f"[INFO] Cleaned up temporary thumbnail file: {temp_thumbnail_path}")
-            except:
-                pass
-        return {"success": False, "error": f"Error uploading thumbnail: {str(e)}"}
-
-def is_youtube_configured() -> bool:
-    """Check if YouTube API is configured"""
-    return get_client_config() is not None
-
-def is_youtube_authenticated() -> bool:
-    """Check if YouTube account is authenticated"""
-    creds = get_credentials()
-    return creds is not None and creds.valid
-
-def check_youtube_account_status() -> Dict[str, Any]:
-    """Check YouTube account status"""
-    youtube = get_youtube_service()
-    if not youtube:
-        return {"error": "Not authenticated. Please authenticate your YouTube account."}
-    
-    try:
-        # Get channel information
-        channels_response = youtube.channels().list(
-            part='snippet,contentDetails,statistics',
-            mine=True
-        ).execute()
-        
-        if channels_response.get('items'):
-            channel = channels_response['items'][0]
-            return {
-                "success": True,
-                "channel_id": channel.get('id'),
-                "channel_title": channel.get('snippet', {}).get('title'),
-                "subscriber_count": channel.get('statistics', {}).get('subscriberCount', '0'),
-                "video_count": channel.get('statistics', {}).get('videoCount', '0'),
-                "view_count": channel.get('statistics', {}).get('viewCount', '0')
-            }
-        else:
-            return {"error": "No channel found for this account"}
-    
-    except HttpError as e:
-        return {"error": f"YouTube API Error: {e.resp.status} - {str(e)}"}
-    except Exception as e:
-        return {"error": f"Error checking account status: {str(e)}"}
-
-def clear_credentials():
-    """Clear stored credentials"""
-    token_file = get_credentials_file_path()
-    if os.path.exists(token_file):
-        try:
-            os.remove(token_file)
-            return True
-        except Exception as e:
-            print(f"Error clearing credentials: {e}")
-            return False
-    return True
-
-def track_youtube_upload_success():
-    """Track successful YouTube upload - increment daily count"""
-    try:
-        today = date.today().isoformat()
-        
-        # Get or create today's tracking record
-        existing = db.execute_query("""
-            SELECT id, upload_count, daily_limit FROM youtube_upload_tracking 
-            WHERE upload_date = ?
-        """, (today,))
-        
-        if existing:
-            # Update existing record
-            track_id = existing[0]['id']
-            current_count = existing[0].get('upload_count', 0) or 0
-            new_count = current_count + 1
-            
-            db.execute_update("""
-                UPDATE youtube_upload_tracking 
-                SET upload_count = ?, last_upload_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (new_count, track_id))
-        else:
-            # Create new record for today
-            db.execute_insert("""
-                INSERT INTO youtube_upload_tracking 
-                (upload_date, upload_count, daily_limit, last_upload_at)
-                VALUES (?, 1, 6, CURRENT_TIMESTAMP)
-            """, (today,))
-    except Exception as e:
-        print(f"Error tracking YouTube upload: {e}")
-
-def track_youtube_upload_limit_reached():
-    """Track when daily upload limit is reached"""
-    try:
-        today = date.today().isoformat()
-        
-        # Get or create today's tracking record
-        existing = db.execute_query("""
-            SELECT id, upload_count, daily_limit FROM youtube_upload_tracking 
-            WHERE upload_date = ?
-        """, (today,))
-        
-        if existing:
-            # Update last upload timestamp to mark limit reached
-            track_id = existing[0]['id']
-            db.execute_update("""
-                UPDATE youtube_upload_tracking 
-                SET last_upload_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (track_id,))
-        else:
-            # Create new record - limit already reached (count = limit)
-            db.execute_insert("""
-                INSERT INTO youtube_upload_tracking 
-                (upload_date, upload_count, daily_limit, last_upload_at)
-                VALUES (?, 6, 6, CURRENT_TIMESTAMP)
-            """, (today,))
-    except Exception as e:
-        print(f"Error tracking YouTube upload limit: {e}")
-
-def get_youtube_upload_status() -> Dict[str, Any]:
-    """Get current YouTube upload status and daily limits"""
-    try:
-        today = date.today().isoformat()
-        
-        # Count actual YouTube uploads from database for today
-        # This gives us the real count from published videos
-        # SQLite doesn't have DATE() function, so we use string matching
-        today_start = f"{today} 00:00:00"
-        today_end = f"{today} 23:59:59"
-        actual_uploads = db.execute_query("""
-            SELECT COUNT(*) as count
-            FROM social_media_posts smp
-            JOIN videos v ON smp.video_id = v.id
-            WHERE smp.platform = 'youtube' 
-            AND smp.status = 'published'
-            AND smp.published_at >= ?
-            AND smp.published_at <= ?
-        """, (today_start, today_end))
-        
-        actual_upload_count = actual_uploads[0]['count'] if actual_uploads else 0
-        
-        # Get today's tracking record
-        tracking = db.execute_query("""
-            SELECT upload_count, daily_limit, account_type, last_upload_at
-            FROM youtube_upload_tracking 
-            WHERE upload_date = ?
-        """, (today,))
-        
-        if tracking:
-            record = tracking[0]
-            tracked_count = record.get('upload_count', 0) or 0
-            daily_limit = record.get('daily_limit', 6) or 6
-            account_type = record.get('account_type', 'unverified') or 'unverified'
-            last_upload = record.get('last_upload_at')
-            
-            # Use the maximum of tracked count and actual uploads (in case tracking was missed)
-            upload_count = max(tracked_count, actual_upload_count)
-            
-            # Update tracking if actual count is higher
-            if actual_upload_count > tracked_count:
-                db.execute_update("""
-                    UPDATE youtube_upload_tracking 
-                    SET upload_count = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE upload_date = ?
-                """, (actual_upload_count, today))
-                upload_count = actual_upload_count
-            
-            remaining = max(0, daily_limit - upload_count)
-            limit_reached = upload_count >= daily_limit
-            
-            return {
-                "today": today,
-                "upload_count": upload_count,
-                "daily_limit": daily_limit,
-                "remaining": remaining,
-                "limit_reached": limit_reached,
-                "account_type": account_type,
-                "last_upload_at": last_upload,
-                "percentage_used": (upload_count / daily_limit * 100) if daily_limit > 0 else 0
-            }
-        else:
-            # No tracking record, but check if there are actual uploads
-            if actual_upload_count > 0:
-                # Create tracking record with actual count
-                db.execute_insert("""
-                    INSERT INTO youtube_upload_tracking 
-                    (upload_date, upload_count, daily_limit, account_type)
-                    VALUES (?, ?, 6, 'unverified')
-                """, (today, actual_upload_count))
-            
-            daily_limit = 6  # Default for unverified accounts
-            remaining = max(0, daily_limit - actual_upload_count)
-            limit_reached = actual_upload_count >= daily_limit
-            
-            return {
-                "today": today,
-                "upload_count": actual_upload_count,
-                "daily_limit": daily_limit,
-                "remaining": remaining,
-                "limit_reached": limit_reached,
-                "account_type": "unverified",
-                "last_upload_at": None,
-                "percentage_used": (actual_upload_count / daily_limit * 100) if daily_limit > 0 else 0
-            }
-    except Exception as e:
-        print(f"Error getting YouTube upload status: {e}")
-        return {
-            "today": date.today().isoformat(),
-            "upload_count": 0,
-            "daily_limit": 6,
-            "remaining": 6,
-            "limit_reached": False,
-            "account_type": "unverified",
-            "last_upload_at": None,
-            "percentage_used": 0,
-            "error": str(e)
-        }
-
-def get_youtube_upload_history(days: int = 7) -> List[Dict[str, Any]]:
-    """Get YouTube upload history for the last N days"""
-    try:
-        history = db.execute_query("""
-            SELECT upload_date, upload_count, daily_limit, account_type, last_upload_at
-            FROM youtube_upload_tracking 
-            ORDER BY upload_date DESC 
-            LIMIT ?
-        """, (days,))
-        
-        return [dict(record) for record in history]
-    except Exception as e:
-        print(f"Error getting YouTube upload history: {e}")
-        return []
 
