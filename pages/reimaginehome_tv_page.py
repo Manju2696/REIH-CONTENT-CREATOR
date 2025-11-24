@@ -201,41 +201,33 @@ def show():
                 .video-wrapper {{
                     width: 100%;
                     height: 100vh;
+                    position: relative;
+                    overflow: hidden;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    position: relative;
-                }}
-                .video-wrapper {{
-                    width: 100%;
-                    height: 100vh;
-                    position: relative;
-                    overflow: hidden;
                 }}
                 .video-item iframe {{
-                    width: 100%;
-                    height: 100%;
+                    width: 100vw;
+                    height: 100vh;
                     border: none;
                     position: absolute;
                     top: 0;
                     left: 0;
                 }}
-                /* Vertical shorts-style: videos fill viewport height */
-                /* On mobile: full width and height */
+                /* Vertical shorts-style: videos fill entire viewport */
+                /* Force vertical layout - each video takes full screen */
                 @media (max-width: 768px) {{
                     .video-item iframe {{
                         width: 100vw;
                         height: 100vh;
                     }}
                 }}
-                /* On desktop: center video maintaining 16:9 aspect ratio */
+                /* On desktop: also full viewport for true shorts experience */
                 @media (min-width: 769px) {{
                     .video-item iframe {{
+                        width: 100vw;
                         height: 100vh;
-                        width: 177.78vh; /* 16:9 = height * 16/9 */
-                        max-width: 100vw;
-                        left: 50%;
-                        transform: translateX(-50%);
                     }}
                 }}
             </style>
@@ -411,25 +403,24 @@ def show():
                     video_db_id = video.get('id')
                     
                     with col:
-                        # Clickable thumbnail - use URL-based approach
+                        # Clickable thumbnail - use HTML component with proper click handling
                         thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                         
-                        # Create clickable thumbnail that uses URL to trigger play
+                        # Create clickable thumbnail HTML
                         thumbnail_html = f"""
-                        <a href="?tv_play={video_id}" style="text-decoration: none; display: block;">
-                            <div style="position: relative; cursor: pointer; margin-bottom: 10px;">
-                                <img src="{thumbnail_url}" 
-                                     style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); 
-                                            transition: transform 0.2s; display: block;" 
-                                     onmouseover="this.style.transform='scale(1.05)'" 
-                                     onmouseout="this.style.transform='scale(1)'" />
-                                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                                            background-color: rgba(0,0,0,0.7); border-radius: 50%; width: 60px; height: 60px; 
-                                            display: flex; align-items: center; justify-content: center; pointer-events: none;">
-                                    <span style="color: white; font-size: 24px; margin-left: 3px;">▶</span>
-                                </div>
+                        <div style="position: relative; cursor: pointer; margin-bottom: 10px;" 
+                             onclick="window.location.href = '?tv_play={video_id}'">
+                            <img src="{thumbnail_url}" 
+                                 style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); 
+                                        transition: transform 0.2s; display: block;" 
+                                 onmouseover="this.style.transform='scale(1.05)'" 
+                                 onmouseout="this.style.transform='scale(1)'" />
+                            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+                                        background-color: rgba(0,0,0,0.7); border-radius: 50%; width: 60px; height: 60px; 
+                                        display: flex; align-items: center; justify-content: center; pointer-events: none;">
+                                <span style="color: white; font-size: 24px; margin-left: 3px;">▶</span>
                             </div>
-                        </a>
+                        </div>
                         """
                         components.html(thumbnail_html, height=200)
                         
