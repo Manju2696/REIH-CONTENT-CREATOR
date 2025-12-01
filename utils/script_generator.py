@@ -107,46 +107,145 @@ def generate_all_scripts_single_call(article_text: str, source_url: str, master_
             try:
                 print(f"[DEBUG] Attempt {attempt + 1}/{max_retries} to generate all scripts")
                 
-                # Use standard chat completions API for all models (including GPT-5)
-                # The new responses.create() API doesn't exist and causes hangs
+                # Prefer new responses.create() API for GPT-5 models when available,
+                # fall back to standard chat.completions API for everything else.
                 content = None
                 token_usage = {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
+                use_new_api = False
                 
-                # Use standard chat completions API
-                print(f"[DEBUG] Using standard chat completions API")
+                if model_name.startswith("gpt-5") and hasattr(client, "responses") and hasattr(client.responses, "create"):
+                    try:
+                        print("[DEBUG] Using new responses.create() API for GPT-5")
+                        response = client.responses.create(
+                            model=model_name,
+                            input=[prompt],
+                            text={
+                                "format": {
+                                    "type": "text"
+                                },
+                                "verbosity": "medium"
+                            },
+                            reasoning={
+                                "effort": "medium",
+                                "summary": "auto"
+                            },
+                            tools=[],
+                            store=True,
+                            include=[
+                                "reasoning.encrypted_content",
+                                "web_search_call.action.sources"
+                            ]
+                        )
+                        use_new_api = True
+                        
+                        # Extract content from new responses.create() API
+                        if hasattr(response, 'output'):
+                            if isinstance(response.output, str):
+                                content = response.output
+                            elif isinstance(response.output, list) and response.output:
+                                first_item = response.output[0]
+                                if isinstance(first_item, str):
+                                    content = first_item
+                                elif isinstance(first_item, dict):
+                                    content = first_item.get('text') or first_item.get('content') or str(first_item)
+                                else:
+                                    content = str(first_item)
+                            elif isinstance(response.output, dict):
+                                content = response.output.get('text') or response.output.get('content') or json.dumps(response.output)
+                            else:
+                                content = str(response.output)
+                        elif hasattr(response, 'text'):
+                            content = response.text
+                        elif hasattr(response, 'content'):
+                            content = response.content
+                        elif hasattr(response, 'response'):
+                            if isinstance(response.response, str):
+                                content = response.response
+                            else:
+                                content = json.dumps(response.response) if isinstance(response.response, dict) else str(response.response)
+                        else:
+                            try:
+                                if hasattr(response, '__dict__'):
+                                    response_dict = response.__dict__
+                                    for field in ['output', 'text', 'content', 'response', 'message', 'data']:
+                                        if field in response_dict:
+                                            field_value = response_dict[field]
+                                            if isinstance(field_value, str):
+                                                content = field_value
+                                                break
+                                            elif isinstance(field_value, dict):
+                                                content = field_value.get('text') or field_value.get('content') or json.dumps(field_value)
+                                                break
+                                    if not content:
+                                        content = json.dumps(response_dict)
+                                else:
+                                    content = str(response)
+                            except Exception as e:
+                                print(f"[DEBUG] Error extracting content from responses.create(): {str(e)}")
+                                content = str(response)
+                        
+                        if not content:
+                            raise ValueError("Could not extract content from new API response")
+                        
+                        # Extract token usage when available
+                        if hasattr(response, 'usage'):
+                            if isinstance(response.usage, dict):
+                                token_usage['input_tokens'] = response.usage.get('prompt_tokens', 0) or response.usage.get('input_tokens', 0)
+                                token_usage['output_tokens'] = response.usage.get('completion_tokens', 0) or response.usage.get('output_tokens', 0)
+                                token_usage['total_tokens'] = response.usage.get('total_tokens', 0)
+                            else:
+                                token_usage['input_tokens'] = getattr(response.usage, 'prompt_tokens', 0) or getattr(response.usage, 'input_tokens', 0)
+                                token_usage['output_tokens'] = getattr(response.usage, 'completion_tokens', 0) or getattr(response.usage, 'output_tokens', 0)
+                                token_usage['total_tokens'] = getattr(response.usage, 'total_tokens', 0)
+                        elif hasattr(response, 'input_tokens') or hasattr(response, 'output_tokens'):
+                            token_usage['input_tokens'] = getattr(response, 'input_tokens', 0)
+                            token_usage['output_tokens'] = getattr(response, 'output_tokens', 0)
+                            token_usage['total_tokens'] = token_usage['input_tokens'] + token_usage['output_tokens']
+                        
+                        print(f"[DEBUG] Token usage (responses.create): Input={token_usage['input_tokens']}, Output={token_usage['output_tokens']}, Total={token_usage['total_tokens']}")
+                    except Exception as e:
+                        # Log and fall back to standard chat completions
+                        print(f"[DEBUG] responses.create() failed for GPT-5, falling back to chat.completions.create: {str(e)}")
+                        use_new_api = False
+                        content = None
+                        token_usage = {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
                 
-                # GPT-5 only supports default temperature (1), not custom values
-                # No reasoning parameters - using standard chat completions API only
-                # Timeout is set at client initialization level (600 seconds = 10 minutes)
-                api_params = {
-                    "model": model_name,
-                    "messages": [
-                        {"role": "system", "content": "Return ONLY valid JSON"},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "response_format": {"type": "json_object"}
-                    # Note: No reasoning parameters (effort, summary, etc.) - using standard API
-                }
-                
-                # Only add temperature if not GPT-5 (GPT-5 only supports default value of 1)
-                if not model_name.startswith("gpt-5"):
-                    api_params["temperature"] = 0.7
-                
-                response = client.chat.completions.create(**api_params)
-                
-                # Extract content from standard API response
-                if response.choices and len(response.choices) > 0:
-                    content = response.choices[0].message.content
+                if not use_new_api:
+                    # Use standard chat completions API (all non-GPT-5 models, or GPT-5 fallback)
+                    print(f"[DEBUG] Using standard chat completions API")
                     
-                    # Extract token usage
-                    token_usage = {
-                        'input_tokens': response.usage.prompt_tokens if response.usage else 0,
-                        'output_tokens': response.usage.completion_tokens if response.usage else 0,
-                        'total_tokens': response.usage.total_tokens if response.usage else 0
+                    # GPT-5 only supports default temperature (1), not custom values
+                    # No reasoning parameters - using standard chat completions API only
+                    # Timeout is set at client initialization level (600 seconds = 10 minutes)
+                    api_params = {
+                        "model": model_name,
+                        "messages": [
+                            {"role": "system", "content": "Return ONLY valid JSON"},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "response_format": {"type": "json_object"}
+                        # Note: No reasoning parameters (effort, summary, etc.) - using standard API
                     }
-                    print(f"[DEBUG] Token usage: Input={token_usage['input_tokens']}, Output={token_usage['output_tokens']}, Total={token_usage['total_tokens']}")
-                else:
-                    return None, "No choices in API response", {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
+                    
+                    # Only add temperature if not GPT-5 (GPT-5 only supports default value of 1)
+                    if not model_name.startswith("gpt-5"):
+                        api_params["temperature"] = 0.7
+                    
+                    response = client.chat.completions.create(**api_params)
+                    
+                    # Extract content from standard API response
+                    if response.choices and len(response.choices) > 0:
+                        content = response.choices[0].message.content
+                        
+                        # Extract token usage
+                        token_usage = {
+                            'input_tokens': response.usage.prompt_tokens if response.usage else 0,
+                            'output_tokens': response.usage.completion_tokens if response.usage else 0,
+                            'total_tokens': response.usage.total_tokens if response.usage else 0
+                        }
+                        print(f"[DEBUG] Token usage (chat.completions): Input={token_usage['input_tokens']}, Output={token_usage['output_tokens']}, Total={token_usage['total_tokens']}")
+                    else:
+                        return None, "No choices in API response", {'input_tokens': 0, 'output_tokens': 0, 'total_tokens': 0}
                 
                 # Parse JSON content
                 if not content:
