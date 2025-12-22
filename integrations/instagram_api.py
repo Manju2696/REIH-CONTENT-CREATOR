@@ -15,13 +15,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config as cfg
 
 def get_instagram_access_token() -> Optional[str]:
-    """Get Instagram access token from config"""
-    # Try environment variable first
+    """Get Instagram access token from config (supports Streamlit secrets)"""
+    # Use config module which properly handles Streamlit secrets
+    credentials = cfg.get_instagram_credentials()
+    if credentials:
+        return credentials.get('access_token')
+    
+    # Fallback: Try environment variable
     access_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
     if access_token:
         return access_token
     
-    # Try config file
+    # Fallback: Try config file
     if cfg.CONFIG_FILE.exists():
         try:
             with open(cfg.CONFIG_FILE, 'r') as f:
@@ -34,13 +39,18 @@ def get_instagram_access_token() -> Optional[str]:
     return None
 
 def get_instagram_account_id() -> Optional[str]:
-    """Get Instagram Business Account ID from config"""
-    # Try environment variable first
+    """Get Instagram Business Account ID from config (supports Streamlit secrets)"""
+    # Use config module which properly handles Streamlit secrets
+    credentials = cfg.get_instagram_credentials()
+    if credentials:
+        return credentials.get('account_id')
+    
+    # Fallback: Try environment variable
     account_id = os.getenv('INSTAGRAM_ACCOUNT_ID')
     if account_id:
         return account_id
     
-    # Try config file
+    # Fallback: Try config file
     if cfg.CONFIG_FILE.exists():
         try:
             with open(cfg.CONFIG_FILE, 'r') as f:
