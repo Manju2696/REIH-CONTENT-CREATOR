@@ -71,13 +71,15 @@ def upload_video_to_instagram(
     Upload video to Instagram using Instagram Graph API
     
     Args:
-        video_file_path: Path to video file
+        video_file_path: Path to video file OR Cloudinary URL
         caption: Video caption (optional, max 2200 characters)
-        thumbnail_path: Path to thumbnail image (optional)
+        thumbnail_path: Path to thumbnail image OR Cloudinary URL (optional)
     
     Returns:
         Dict with 'success' (bool), 'media_id', 'media_url', or 'error'
     """
+    import time
+    
     access_token = get_instagram_access_token()
     account_id = get_instagram_account_id()
     
@@ -87,103 +89,51 @@ def upload_video_to_instagram(
     if not account_id:
         return {"error": "Instagram account ID not found. Please configure it in Settings."}
     
-    # Check if video_file_path is a Cloudinary URL or local file
-    is_cloudinary_url = isinstance(video_file_path, str) and 'res.cloudinary.com' in video_file_path
-    
     # Validate video file
     if not video_file_path:
         return {"error": "Video file path is required"}
     
-    # For local files, check if they exist
-    if not is_cloudinary_url and not os.path.exists(video_file_path):
-        return {"error": f"Video file not found: {video_file_path}"}
+    # Check if video_file_path is a URL (Cloudinary or other public URL)
+    is_video_url = isinstance(video_file_path, str) and (
+        video_file_path.startswith('http://') or video_file_path.startswith('https://')
+    )
     
-    # Handle Cloudinary URLs - download to temporary file first
-    temp_file_path = None
-    actual_video_path = video_file_path
+    # Instagram Graph API requires video to be a public URL
+    if not is_video_url:
+        return {"error": "Instagram API requires video to be a public URL (e.g., Cloudinary URL). Local file uploads are not supported."}
     
-    if is_cloudinary_url:
-        try:
-            print(f"[INFO] Downloading video from Cloudinary URL: {video_file_path[:80]}...")
-            
-            # Download video from Cloudinary URL
-            response = requests.get(video_file_path, stream=True, timeout=300)  # 5 minute timeout for large videos
-            if response.status_code != 200:
-                return {"error": f"Failed to download video from Cloudinary: HTTP {response.status_code}"}
-            
-            # Save to temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        temp_file.write(chunk)
-                temp_file_path = temp_file.name
-            
-            actual_video_path = temp_file_path
-            print(f"[INFO] Downloaded video to temporary file: {temp_file_path}")
-            
-        except Exception as e:
-            return {"error": f"Failed to download video from Cloudinary: {str(e)}"}
+    video_url = video_file_path
+    
+    # Prepare caption (limit to 2200 characters)
+    caption = (caption or "").strip()[:2200]
     
     try:
-        # Step 1: Create a container (upload video metadata)
+        # Step 1: Create video container with URL
         # Instagram requires a two-step process: create container, then publish
-        
-        # Read video file
-        with open(actual_video_path, 'rb') as video_file:
-            video_data = video_file.read()
-        
-        # Prepare caption (limit to 2200 characters)
-        caption = (caption or "").strip()[:2200]
-        
-        # Step 1: Create video container
         container_url = f"https://graph.facebook.com/v18.0/{account_id}/media"
+        
         container_params = {
-            'media_type': 'REELS',  # Use REELS for vertical videos
+            'media_type': 'REELS',
+            'video_url': video_url,
             'caption': caption,
-            'access_token': access_token
+            'access_token': access_token,
+            'share_to_feed': 'true'  # Share to both Reels and Feed
         }
         
-        # Upload video file
-        files = {
-            'video_file': (os.path.basename(actual_video_path), video_data, 'video/mp4')
-        }
-        
-        # Handle thumbnail (can be Cloudinary URL or local file)
-        temp_thumbnail_path = None
-        actual_thumbnail_path = thumbnail_path
-        
+        # Add cover_url if thumbnail is provided (must be a URL)
         if thumbnail_path:
-            # Check if thumbnail is a Cloudinary URL
-            is_cloudinary_thumbnail = isinstance(thumbnail_path, str) and 'res.cloudinary.com' in thumbnail_path
-            
-            if is_cloudinary_thumbnail:
-                try:
-                    print(f"[INFO] Downloading thumbnail from Cloudinary URL: {thumbnail_path[:80]}...")
-                    
-                    # Download thumbnail from Cloudinary URL
-                    thumb_response = requests.get(thumbnail_path, stream=True, timeout=60)
-                    if thumb_response.status_code == 200:
-                        # Save to temporary file
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_thumb_file:
-                            for chunk in thumb_response.iter_content(chunk_size=8192):
-                                if chunk:
-                                    temp_thumb_file.write(chunk)
-                            temp_thumbnail_path = temp_thumb_file.name
-                        
-                        actual_thumbnail_path = temp_thumbnail_path
-                        print(f"[INFO] Downloaded thumbnail to temporary file: {temp_thumbnail_path}")
-                except Exception as e:
-                    print(f"[WARNING] Failed to download thumbnail from Cloudinary: {str(e)}")
-                    actual_thumbnail_path = None
-            
-            # If thumbnail exists (local or downloaded), add it
-            if actual_thumbnail_path and os.path.exists(actual_thumbnail_path):
-                with open(actual_thumbnail_path, 'rb') as thumb_file:
-                    thumb_data = thumb_file.read()
-                    files['cover_url'] = (os.path.basename(actual_thumbnail_path), thumb_data, 'image/jpeg')
+            is_thumbnail_url = isinstance(thumbnail_path, str) and (
+                thumbnail_path.startswith('http://') or thumbnail_path.startswith('https://')
+            )
+            if is_thumbnail_url:
+                container_params['cover_url'] = thumbnail_path
+            else:
+                print(f"[WARNING] Thumbnail must be a URL for Instagram API. Skipping thumbnail.")
         
-        # Create container
-        response = requests.post(container_url, params=container_params, files=files)
+        print(f"[INFO] Creating Instagram container with video URL: {video_url[:80]}...")
+        
+        # Create container (POST request with params, no files)
+        response = requests.post(container_url, data=container_params)
         
         if response.status_code != 200:
             error_data = response.json() if response.content else {}
@@ -196,14 +146,51 @@ def upload_video_to_instagram(
         if not creation_id:
             return {"error": "Failed to get creation ID from Instagram"}
         
-        # Step 2: Publish the container
+        print(f"[INFO] Container created with ID: {creation_id}. Waiting for video processing...")
+        
+        # Step 2: Wait for video to be processed (poll status)
+        status_url = f"https://graph.facebook.com/v18.0/{creation_id}"
+        max_attempts = 30  # Max 5 minutes (30 * 10 seconds)
+        
+        for attempt in range(max_attempts):
+            status_params = {
+                'fields': 'status_code,status',
+                'access_token': access_token
+            }
+            status_response = requests.get(status_url, params=status_params)
+            
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                status_code = status_data.get('status_code')
+                
+                print(f"[INFO] Attempt {attempt + 1}: Status = {status_code}")
+                
+                if status_code == 'FINISHED':
+                    print("[INFO] Video processing complete!")
+                    break
+                elif status_code == 'ERROR':
+                    return {"error": f"Instagram video processing failed: {status_data.get('status', 'Unknown error')}"}
+                elif status_code in ['IN_PROGRESS', 'PUBLISHED']:
+                    # Still processing, wait and retry
+                    time.sleep(10)
+                else:
+                    # Unknown status, wait and retry
+                    time.sleep(10)
+            else:
+                print(f"[WARNING] Failed to get status: HTTP {status_response.status_code}")
+                time.sleep(10)
+        else:
+            return {"error": "Instagram video processing timed out. Please try again."}
+        
+        # Step 3: Publish the container
+        print("[INFO] Publishing to Instagram...")
         publish_url = f"https://graph.facebook.com/v18.0/{account_id}/media_publish"
         publish_params = {
             'creation_id': creation_id,
             'access_token': access_token
         }
         
-        publish_response = requests.post(publish_url, params=publish_params)
+        publish_response = requests.post(publish_url, data=publish_params)
         
         if publish_response.status_code != 200:
             error_data = publish_response.json() if publish_response.content else {}
@@ -216,8 +203,20 @@ def upload_video_to_instagram(
         if not media_id:
             return {"error": "Failed to get media ID from Instagram"}
         
-        # Get media URL
-        media_url = f"https://www.instagram.com/p/{media_id}/"
+        # Get the permalink for the published media
+        permalink_url = f"https://graph.facebook.com/v18.0/{media_id}"
+        permalink_params = {
+            'fields': 'permalink',
+            'access_token': access_token
+        }
+        permalink_response = requests.get(permalink_url, params=permalink_params)
+        
+        media_url = f"https://www.instagram.com/reel/{media_id}/"
+        if permalink_response.status_code == 200:
+            permalink_data = permalink_response.json()
+            media_url = permalink_data.get('permalink', media_url)
+        
+        print(f"[SUCCESS] Published to Instagram: {media_url}")
         
         return {
             "success": True,
@@ -228,22 +227,6 @@ def upload_video_to_instagram(
     
     except Exception as e:
         return {"error": f"Error uploading to Instagram: {str(e)}"}
-    
-    finally:
-        # Clean up temporary files if they were created
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-                print(f"[INFO] Cleaned up temporary video file: {temp_file_path}")
-            except Exception as e:
-                print(f"[WARNING] Error cleaning up temporary video file {temp_file_path}: {str(e)}")
-        
-        if temp_thumbnail_path and os.path.exists(temp_thumbnail_path):
-            try:
-                os.unlink(temp_thumbnail_path)
-                print(f"[INFO] Cleaned up temporary thumbnail file: {temp_thumbnail_path}")
-            except Exception as e:
-                print(f"[WARNING] Error cleaning up temporary thumbnail file {temp_thumbnail_path}: {str(e)}")
 
 def is_instagram_configured() -> bool:
     """Check if Instagram API is configured"""
