@@ -480,7 +480,7 @@ def show():
                         
                         platform = st.radio(
                             "Platform",
-                            ["All", "YouTube", "Instagram", "TikTok", "REih TV"],
+                            ["All", "YouTube", "Instagram", "Facebook", "TikTok", "REih TV"],
                             key=f"platform_{video_id}",
                             label_visibility="collapsed"
                         )
@@ -488,7 +488,7 @@ def show():
                         st.markdown("---")
                         
                         # Define all platforms
-                        all_platforms = ["YouTube", "Instagram", "TikTok", "REih TV"]
+                        all_platforms = ["YouTube", "Instagram", "Facebook", "TikTok", "REih TV"]
                         
                         # Handle "All" platform selection
                         if platform == "All":

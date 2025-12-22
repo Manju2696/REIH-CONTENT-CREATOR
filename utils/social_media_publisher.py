@@ -271,6 +271,110 @@ def publish_to_tiktok(
     }
 
 
+
+def publish_to_facebook(
+    video_file_path: str,
+    thumbnail_file_path: Optional[str],
+    title: str,
+    description: str,
+    keywords: str,
+    transcription: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Publish video to Facebook Page
+    
+    Args:
+        video_file_path: Path to video file (must be public URL for FB Graph API)
+        thumbnail_file_path: Path to thumbnail image (optional)
+        title: Video title
+        description: Video description/caption
+        keywords: Hashtags
+        transcription: Video transcription (optional)
+    """
+    try:
+        from integrations import facebook_api
+        
+        # Check if URL (Facebook Graph API works best with URLs)
+        is_url = isinstance(video_file_path, str) and (video_file_path.startswith('http://') or video_file_path.startswith('https://'))
+        if not is_url:
+            return {
+                "success": False, 
+                "error": "Facebook integration currently requires cloud-hosted videos (e.g. Cloudinary). Please enable Cloudinary."
+            }
+        
+        # Build description with hashtags
+        caption_parts = []
+        if description and description.strip() and description != 'N/A':
+            caption_parts.append(description.strip())
+            
+        hashtags = []
+        if keywords and keywords != 'N/A':
+            if isinstance(keywords, str):
+                tags = [tag.strip() for tag in keywords.split(',') if tag.strip()]
+                hashtags = [f"#{tag.replace('#', '').replace(' ', '')}" for tag in tags]
+            elif isinstance(keywords, list):
+                hashtags = [f"#{str(tag).strip().replace('#', '').replace(' ', '')}" for tag in keywords if tag]
+        
+        if hashtags:
+            caption_parts.append(" ".join(hashtags))
+            
+        full_description = "\n\n".join(caption_parts)
+        
+        # Upload
+        result = facebook_api.upload_video_to_facebook(
+            video_url=video_file_path,
+            description=full_description,
+            title=title
+        )
+        
+        if result.get('success'):
+            # Track upload in database
+            video_id = result.get('video_id')
+            video_url = result.get('video_url')
+            
+             # Save to social_media_posts table
+            try:
+                # Get script_id from video_file_path if possible
+                script_id = None
+                if 'script_' in video_file_path:
+                    # Try to extract script_id from filename
+                    import re
+                    match = re.search(r'script_(\d+)_', video_file_path)
+                    if match:
+                        script_id = match.group(1)
+                
+                db.execute_insert("""
+                    INSERT INTO social_media_posts 
+                    (video_id, platform, post_url, status, published_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (
+                    script_id,
+                    'facebook',
+                    video_url,
+                    'published'
+                ))
+            except Exception as e:
+                print(f"[WARNING] Failed to save Facebook post to database: {str(e)}")
+            
+            return {
+                "success": True,
+                "video_id": video_id,
+                "video_url": video_url,
+                "message": f"✅ Successfully published to Facebook Page: {video_url}"
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get('error', 'Unknown error during Facebook upload')
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Facebook upload failed: {str(e)}"
+        }
+
+
 def publish_to_reih_tv(
     video_file_path: str,
     thumbnail_file_path: Optional[str],
@@ -338,6 +442,15 @@ def publish_to_platform(
         )
     elif platform_lower == 'instagram':
         return publish_to_instagram(
+            video_file_path=video_file_path,
+            thumbnail_file_path=thumbnail_file_path,
+            title=title,
+            description=description,
+            keywords=keywords,
+            transcription=transcription
+        )
+    elif platform_lower == 'facebook':
+        return publish_to_facebook(
             video_file_path=video_file_path,
             thumbnail_file_path=thumbnail_file_path,
             title=title,
