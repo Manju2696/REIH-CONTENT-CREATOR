@@ -259,16 +259,92 @@ def publish_to_tiktok(
     Returns:
         Dict with 'success' (bool), 'post_id', 'post_url', or 'error'
     """
-    # TikTok API requires:
-    # 1. TikTok Developer Account
-    # 2. TikTok for Developers App
-    # 3. OAuth access token
-    
-    # For now, return a placeholder
-    return {
-        "success": False,
-        "error": "TikTok API integration not yet implemented. TikTok requires developer account and app setup."
-    }
+    try:
+        from integrations import tiktok_api
+        
+        # Check if configured (access token is required)
+        if not tiktok_api.check_tiktok_auth().get('authenticated'):
+             return {
+                "success": False,
+                "error": "TikTok not authenticated. Please configure TikTok Access Token in Settings."
+            }
+        
+        # Build description with hashtags (TikTok uses title as description mostly, or description field)
+        # The tiktok_api.upload_video_to_tiktok uses 'title' as the main text
+        
+        full_text = title
+        if description and description.strip() and description != 'N/A':
+            full_text += f"\n\n{description}"
+            
+        hashtags = []
+        if keywords and keywords != 'N/A':
+            if isinstance(keywords, str):
+                tags = [tag.strip() for tag in keywords.split(',') if tag.strip()]
+                hashtags = [f"#{tag.replace('#', '').replace(' ', '')}" for tag in tags]
+            elif isinstance(keywords, list):
+                hashtags = [f"#{str(tag).strip().replace('#', '').replace(' ', '')}" for tag in keywords if tag]
+        
+        if hashtags:
+            full_text += " " + " ".join(hashtags)
+        
+        # Upload
+        result = tiktok_api.upload_video_to_tiktok(
+            video_file_path=video_file_path,
+            title=full_text, # TikTok uses this as the caption
+            privacy_level="PUBLIC_TO_EVERYONE"
+        )
+        
+        if result.get('success'):
+            # Track upload in database
+            video_id = result.get('video_id')
+            video_url = result.get('video_url')
+            
+            # Save to social_media_posts table
+            try:
+                # Get script_id from video_file_path if possible
+                script_id = None
+                if 'script_' in video_file_path:
+                    # Try to extract script_id from filename
+                    import re
+                    match = re.search(r'script_(\d+)_', video_file_path)
+                    if match:
+                        script_id = match.group(1)
+                
+                db.execute_insert("""
+                    INSERT INTO social_media_posts 
+                    (video_id, platform, post_url, status, published_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (
+                    script_id,
+                    'tiktok',
+                    video_url,
+                    'published'
+                ))
+            except Exception as e:
+                print(f"[WARNING] Failed to save TikTok post to database: {str(e)}")
+            
+            return {
+                "success": True,
+                "video_id": video_id,
+                "video_url": video_url,
+                "message": f"✅ Successfully submitted to TikTok. It will appear on your profile shortly."
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get('error', 'Unknown error during TikTok upload')
+            }
+            
+    except ImportError:
+        return {
+            "success": False,
+            "error": "TikTok API module not found."
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"TikTok upload failed: {str(e)}"
+        }
 
 
 

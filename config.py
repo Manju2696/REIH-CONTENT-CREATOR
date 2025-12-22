@@ -723,7 +723,7 @@ def get_tiktok_credentials():
         except:
             pass
         
-        if access_token and advertiser_id:
+        if access_token:
             return {'access_token': access_token, 'advertiser_id': advertiser_id}
         return None
     
@@ -749,14 +749,14 @@ def get_tiktok_credentials():
         pass
     
     # If we got credentials from secrets, return them
-    if access_token and advertiser_id:
+    if access_token:
         return {'access_token': access_token, 'advertiser_id': advertiser_id}
     
     # Fall back to environment variables
     access_token = _get_env_var('TIKTOK_ACCESS_TOKEN')
     advertiser_id = _get_env_var('TIKTOK_ADVERTISER_ID')
     
-    if access_token and advertiser_id:
+    if access_token:
         return {'access_token': access_token, 'advertiser_id': advertiser_id}
     return None
 

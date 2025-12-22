@@ -595,7 +595,8 @@ ACCESS_TOKEN = "paste-access-token-here"
                 col_t1, col_t2 = st.columns(2)
                 with col_t1:
                     if st.button("💾 Save TikTok Credentials", key="save_tiktok", use_container_width=True):
-                        if tiktok_access_token and tiktok_advertiser_id:
+                        if tiktok_access_token:
+                            # Advertiser ID is optional for Content Posting API
                             result = config.save_tiktok_credentials(tiktok_access_token, tiktok_advertiser_id)
                             if isinstance(result, tuple):
                                 success, message = result
@@ -609,7 +610,7 @@ ACCESS_TOKEN = "paste-access-token-here"
                             else:
                                 st.error("❌ Failed to save credentials.")
                         else:
-                            st.error("Please enter both Access Token and Advertiser ID")
+                            st.error("Please enter Access Token")
                 with col_t2:
                     if tiktok_creds and st.button("🗑️ Clear", key="clear_tiktok", use_container_width=True):
                         if config.clear_tiktok_credentials():

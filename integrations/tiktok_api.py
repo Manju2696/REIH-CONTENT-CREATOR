@@ -71,37 +71,46 @@ def upload_video_to_tiktok(
         Dict with 'success' (bool), 'video_id', 'video_url', or 'error'
     """
     access_token = get_tiktok_access_token()
-    advertiser_id = get_tiktok_advertiser_id()
     
     if not access_token:
         return {"error": "TikTok access token not found. Please configure it in Settings."}
     
-    if not advertiser_id:
-        return {"error": "TikTok advertiser ID not found. Please configure it in Settings."}
+    # Check if video_file_path is a URL
+    is_url = isinstance(video_file_path, str) and (video_file_path.startswith('http://') or video_file_path.startswith('https://'))
     
-    if not video_file_path or not os.path.exists(video_file_path):
+    if not is_url and (not video_file_path or not os.path.exists(video_file_path)):
         return {"error": f"Video file not found: {video_file_path}"}
     
     try:
-        # Step 1: Initialize upload - Get upload URL
+        # Step 1: Initialize upload
         init_url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
         init_headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
         
-        init_response = requests.post(init_url, headers=init_headers, json={
-            "source_info": {
+        # Determine source type
+        source_info = {}
+        if is_url:
+            source_info = {
+                "source": "PULL_FROM_URL",
+                "video_url": video_file_path
+            }
+        else:
+            source_info = {
                 "source": "FILE_UPLOAD"
-            },
+            }
+            
+        init_response = requests.post(init_url, headers=init_headers, json={
             "post_info": {
-                "title": title[:150],  # TikTok title limit
+                "title": title[:150],
                 "privacy_level": privacy_level,
                 "disable_duet": False,
                 "disable_comment": False,
                 "disable_stitch": False,
                 "video_cover_timestamp_ms": 1000
-            }
+            },
+            "source_info": source_info
         })
         
         if init_response.status_code != 200:
@@ -110,63 +119,39 @@ def upload_video_to_tiktok(
             return {"error": f"Failed to initialize TikTok upload: {error_msg}"}
         
         init_data = init_response.json()
-        upload_url = init_data.get('data', {}).get('upload_url')
         publish_id = init_data.get('data', {}).get('publish_id')
         
-        if not upload_url or not publish_id:
-            return {"error": "Failed to get upload URL from TikTok"}
+        if not publish_id:
+            return {"error": "Failed to get publish_id from TikTok"}
+            
+        # If FILE_UPLOAD, we need to upload the file now
+        if not is_url:
+            upload_url = init_data.get('data', {}).get('upload_url')
+            if not upload_url:
+                return {"error": "Failed to get upload URL from TikTok"}
+                
+            with open(video_file_path, 'rb') as video_file:
+                video_data = video_file.read()
+            
+            upload_headers = {"Content-Type": "video/mp4"}
+            upload_response = requests.put(upload_url, headers=upload_headers, data=video_data)
+            
+            if upload_response.status_code not in [200, 204]:
+                return {"error": f"Failed to upload video to TikTok: HTTP {upload_response.status_code}"}
         
-        # Step 2: Upload video file
-        with open(video_file_path, 'rb') as video_file:
-            video_data = video_file.read()
+        # Step 3: Check status
+        # For PULL_FROM_URL, it might take a moment to download
+        print(f"[INFO] TikTok publish initialized. Publish ID: {publish_id}")
         
-        upload_headers = {
-            "Content-Type": "video/mp4"
+        # We can poll for status, but TikTok processing can be slow. 
+        # Unlike IG, we might just return success with the publish_id
+        
+        return {
+            "success": True,
+            "publish_id": publish_id,
+            "message": "Video submitted to TikTok. It will appear on your profile once processed."
         }
-        
-        upload_response = requests.put(upload_url, headers=upload_headers, data=video_data)
-        
-        if upload_response.status_code not in [200, 204]:
-            return {"error": f"Failed to upload video to TikTok: HTTP {upload_response.status_code}"}
-        
-        # Step 3: Get upload status and publish
-        status_url = f"https://open.tiktokapis.com/v2/post/publish/status/fetch/"
-        status_headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        # Poll for upload status
-        max_attempts = 30
-        for attempt in range(max_attempts):
-            status_response = requests.post(status_url, headers=status_headers, json={
-                "publish_id": publish_id
-            })
             
-            if status_response.status_code != 200:
-                return {"error": f"Failed to check upload status: HTTP {status_response.status_code}"}
-            
-            status_data = status_response.json()
-            status = status_data.get('data', {}).get('status')
-            
-            if status == "PUBLISHED":
-                video_id = status_data.get('data', {}).get('video_id')
-                video_url = f"https://www.tiktok.com/@your_account/video/{video_id}"  # Update with actual account
-                return {
-                    "success": True,
-                    "video_id": video_id,
-                    "video_url": video_url,
-                    "publish_id": publish_id
-                }
-            elif status == "FAILED":
-                error_msg = status_data.get('data', {}).get('fail_reason', "Unknown error")
-                return {"error": f"TikTok upload failed: {error_msg}"}
-            
-            # Wait before next poll
-            time.sleep(2)
-        
-        return {"error": "TikTok upload timed out - video is still processing"}
-    
     except Exception as e:
         return {"error": f"Error uploading to TikTok: {str(e)}"}
 
