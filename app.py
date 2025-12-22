@@ -16,7 +16,9 @@ from pages import (
     upload_video_page,
     video_management_page,
     settings_page,
-    reimaginehome_tv_page
+    reimaginehome_tv_page,
+    terms_of_service,
+    privacy_policy
 )
 
 # Page configuration
@@ -396,6 +398,19 @@ with st.sidebar:
     st.caption(f"👤 Logged in as `{user_email}`")
     if st.button("🚪 Logout", key="sidebar_logout", use_container_width=True, type="secondary", help="Click to logout"):
         auth.logout()
+    
+    # Legal links section
+    st.markdown("---")
+    st.markdown("### 📋 Legal")
+    legal_col1, legal_col2 = st.columns(2)
+    with legal_col1:
+        if st.button("📜 Terms", key="nav_terms", use_container_width=True, type="secondary"):
+            st.session_state.page = "📜 Terms of Service"
+            st.rerun()
+    with legal_col2:
+        if st.button("🔒 Privacy", key="nav_privacy", use_container_width=True, type="secondary"):
+            st.session_state.page = "🔒 Privacy Policy"
+            st.rerun()
 
 st.markdown('<h1 class="main-header">⚙️ REimaginehome Content Creator</h1>', unsafe_allow_html=True)
 
@@ -411,6 +426,10 @@ try:
         reimaginehome_tv_page.show()
     elif st.session_state.page == "⚙️ Settings":
         settings_page.show()
+    elif st.session_state.page == "📜 Terms of Service":
+        terms_of_service.show()
+    elif st.session_state.page == "🔒 Privacy Policy":
+        privacy_policy.show()
     else:
         # Default to Generate Scripts if page state is invalid
         st.session_state.page = "📝 Generate Scripts"
