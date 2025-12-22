@@ -141,7 +141,7 @@ def show():
                     
                     if cloudinary_creds and cloudinary_creds.get('cloud_name'):
                         # Use Cloudinary for persistent cloud storage
-                        from utils.cloudinary_storage import configure_cloudinary, upload_file
+                        from utils.cloudinary_storage import configure_cloudinary, upload_file_from_bytes
                         
                         # Configure Cloudinary
                         configure_cloudinary(
@@ -155,10 +155,11 @@ def show():
                             timestamp = int(datetime.now().timestamp())
                             video_public_id = f"videos/upload_{timestamp}_{uploaded_video.name.rsplit('.', 1)[0]}"
                             
-                            video_result = upload_file(
+                            video_result = upload_file_from_bytes(
                                 uploaded_video.getvalue(),
-                                public_id=video_public_id,
-                                resource_type='video'
+                                filename=uploaded_video.name,
+                                resource_type='video',
+                                public_id=video_public_id
                             )
                             
                             if not video_result or not video_result.get('secure_url'):
@@ -174,10 +175,11 @@ def show():
                             with st.spinner("☁️ Uploading thumbnail to cloud storage..."):
                                 thumb_public_id = f"thumbnails/upload_{timestamp}_{uploaded_thumbnail.name.rsplit('.', 1)[0]}"
                                 
-                                thumb_result = upload_file(
+                                thumb_result = upload_file_from_bytes(
                                     uploaded_thumbnail.getvalue(),
-                                    public_id=thumb_public_id,
-                                    resource_type='image'
+                                    filename=uploaded_thumbnail.name,
+                                    resource_type='image',
+                                    public_id=thumb_public_id
                                 )
                                 
                                 if thumb_result and thumb_result.get('secure_url'):
