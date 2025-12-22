@@ -135,42 +135,90 @@ def show():
             elif not title or title.strip() == '':
                 st.error("⚠️ Please enter a title")
             else:
-                # Save video and thumbnail files
-                uploads_dir = os.path.join(os.getcwd(), "uploads", "videos")
-                os.makedirs(uploads_dir, exist_ok=True)
-                
                 try:
-                    # Save video file
-                    timestamp = int(datetime.now().timestamp())
-                    video_filename = f"video_{timestamp}_{uploaded_video.name}"
-                    video_path = os.path.join(uploads_dir, video_filename)
+                    # Check if Cloudinary is configured (required for persistent storage on Streamlit Cloud)
+                    cloudinary_creds = config.get_cloudinary_credentials()
                     
-                    with open(video_path, "wb") as f:
-                        f.write(uploaded_video.getbuffer())
+                    if cloudinary_creds and cloudinary_creds.get('cloud_name'):
+                        # Use Cloudinary for persistent cloud storage
+                        from utils.cloudinary_storage import configure_cloudinary, upload_file
+                        
+                        # Configure Cloudinary
+                        configure_cloudinary(
+                            cloudinary_creds['cloud_name'],
+                            cloudinary_creds['api_key'],
+                            cloudinary_creds['api_secret']
+                        )
+                        
+                        # Upload video to Cloudinary
+                        with st.spinner("☁️ Uploading video to cloud storage..."):
+                            timestamp = int(datetime.now().timestamp())
+                            video_public_id = f"videos/upload_{timestamp}_{uploaded_video.name.rsplit('.', 1)[0]}"
+                            
+                            video_result = upload_file(
+                                uploaded_video.getvalue(),
+                                public_id=video_public_id,
+                                resource_type='video'
+                            )
+                            
+                            if not video_result or not video_result.get('secure_url'):
+                                st.error("❌ Failed to upload video to cloud storage")
+                                st.stop()
+                            
+                            video_path = video_result['secure_url']
+                            st.success(f"✅ Video uploaded to cloud")
+                        
+                        # Upload thumbnail to Cloudinary if provided
+                        thumbnail_path = None
+                        if uploaded_thumbnail:
+                            with st.spinner("☁️ Uploading thumbnail to cloud storage..."):
+                                thumb_public_id = f"thumbnails/upload_{timestamp}_{uploaded_thumbnail.name.rsplit('.', 1)[0]}"
+                                
+                                thumb_result = upload_file(
+                                    uploaded_thumbnail.getvalue(),
+                                    public_id=thumb_public_id,
+                                    resource_type='image'
+                                )
+                                
+                                if thumb_result and thumb_result.get('secure_url'):
+                                    thumbnail_path = thumb_result['secure_url']
+                                    st.success(f"✅ Thumbnail uploaded to cloud")
                     
-                    # Save thumbnail file if provided
-                    thumbnail_path = None
-                    if uploaded_thumbnail:
-                        thumbnail_filename = f"thumbnail_{timestamp}_{uploaded_thumbnail.name}"
-                        thumbnail_path = os.path.join(uploads_dir, thumbnail_filename)
-                        with open(thumbnail_path, "wb") as f:
-                            f.write(uploaded_thumbnail.getbuffer())
+                    else:
+                        # Cloudinary not configured - use local storage (won't persist on Streamlit Cloud)
+                        st.warning("⚠️ Cloudinary not configured. Videos will be stored locally and may be lost after app restart. Configure Cloudinary in Settings for persistent storage.")
+                        
+                        uploads_dir = os.path.join(os.getcwd(), "uploads", "videos")
+                        os.makedirs(uploads_dir, exist_ok=True)
+                        
+                        timestamp = int(datetime.now().timestamp())
+                        video_filename = f"video_{timestamp}_{uploaded_video.name}"
+                        video_path = os.path.join(uploads_dir, video_filename)
+                        
+                        with open(video_path, "wb") as f:
+                            f.write(uploaded_video.getbuffer())
+                        
+                        thumbnail_path = None
+                        if uploaded_thumbnail:
+                            thumbnail_filename = f"thumbnail_{timestamp}_{uploaded_thumbnail.name}"
+                            thumbnail_path = os.path.join(uploads_dir, thumbnail_filename)
+                            with open(thumbnail_path, "wb") as f:
+                                f.write(uploaded_thumbnail.getbuffer())
                     
                     # Save to database
-                    # Note: We'll need to create a table for uploaded videos if it doesn't exist
-                    # For now, we'll use a simple approach
-                    video_id = db.execute_insert("""
-                        INSERT INTO uploaded_videos 
-                        (video_file_path, thumbnail_file_path, title, description, keywords, transcription, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (
-                        video_path,
-                        thumbnail_path,
-                        title.strip() if title else None,
-                        description.strip() if description else None,
-                        keywords.strip() if keywords else None,
-                        transcription.strip() if transcription else None
-                    ))
+                    with st.spinner("💾 Saving to database..."):
+                        video_id = db.execute_insert("""
+                            INSERT INTO uploaded_videos 
+                            (video_file_path, thumbnail_file_path, title, description, keywords, transcription, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """, (
+                            video_path,
+                            thumbnail_path,
+                            title.strip() if title else None,
+                            description.strip() if description else None,
+                            keywords.strip() if keywords else None,
+                            transcription.strip() if transcription else None
+                        ))
                     
                     st.success(f"✅ Video uploaded successfully! Video ID: {video_id}")
                     st.rerun()
@@ -505,9 +553,13 @@ def show():
                                                 st.session_state[f"publish_status_{video_id}_{p}"] = 'publishing'
                                             
                                             # Store publish request in session state to process on next rerun
+                                            # Check if thumbnail is URL or local file
+                                            is_cloudinary_thumb = isinstance(thumbnail_file_path, str) and ('res.cloudinary.com' in thumbnail_file_path or thumbnail_file_path.startswith('http'))
+                                            valid_thumbnail = thumbnail_file_path and (is_cloudinary_thumb or os.path.exists(thumbnail_file_path))
+                                            
                                             st.session_state[f"publish_all_request_{video_id}"] = {
                                                 'video_file_path': video_file_path,
-                                                'thumbnail_file_path': thumbnail_file_path if thumbnail_file_path and os.path.exists(thumbnail_file_path) else None,
+                                                'thumbnail_file_path': thumbnail_file_path if valid_thumbnail else None,
                                                 'title': title,
                                                 'description': publish_description,
                                                 'keywords': publish_keywords,
@@ -634,11 +686,15 @@ def show():
                                             
                                             # Show progress
                                             with st.spinner(f"📤 Publishing to {platform}... This may take a few minutes."):
+                                                # Check if thumbnail is URL or local file
+                                                is_cloudinary_thumb = isinstance(thumbnail_file_path, str) and ('res.cloudinary.com' in thumbnail_file_path or thumbnail_file_path.startswith('http'))
+                                                valid_thumbnail = thumbnail_file_path and (is_cloudinary_thumb or os.path.exists(thumbnail_file_path))
+                                                
                                                 # Publish to platform
                                                 result = publish_to_platform(
                                                     platform=platform,
                                                     video_file_path=video_file_path,
-                                                    thumbnail_file_path=thumbnail_file_path if thumbnail_file_path and os.path.exists(thumbnail_file_path) else None,
+                                                    thumbnail_file_path=thumbnail_file_path if valid_thumbnail else None,
                                                     title=title,
                                                     description=publish_description,
                                                     keywords=publish_keywords,
