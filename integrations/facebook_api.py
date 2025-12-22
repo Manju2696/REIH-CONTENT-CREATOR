@@ -120,9 +120,9 @@ def upload_video_to_facebook(
         page_id=page_id,
         instagram_account_id=creds.get('instagram_account_id') if creds else None
     )
-    
+    args_creds = get_facebook_credentials()
     if not page_info:
-        return {"success": False, "error": "Could not find a valid Facebook Page to post to. Make sure your account manages a Page."}
+        return {"success": False, "error": "Could not find a valid Facebook Page. Please ensure your Access Token has 'pages_show_list' and 'pages_manage_posts' permissions."}
     
     page_access_token, target_page_id, page_name = page_info
     
