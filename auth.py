@@ -72,236 +72,284 @@ def check_credentials(email, password):
         return False, "Incorrect password"
 
 def show_login():
-    """Show login page"""
-    # Hide sidebar and all Streamlit default elements during login
+    """Show login page with new split-screen design"""
+    # Hide sidebar and all Streamlit default elements
     st.markdown("""
         <style>
-        /* Hide sidebar on login page */
-        section[data-testid="stSidebar"] {
-            display: none !important;
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+        
+        /* Global Reset & Background */
+        .stApp {
+            background-color: #0E0E0E !important;
+            font-family: 'Inter', sans-serif !important;
         }
         
-        /* Hide main header */
-        header[data-testid="stHeader"] {
-            display: none !important;
-        }
-        
-        /* Hide footer */
-        footer {
-            display: none !important;
-        }
-        
-        /* Hide Streamlit menu */
-        #MainMenu {
-            visibility: hidden !important;
-        }
-        
-        /* Hide deploy button */
+        /* Hide Default Elements */
+        section[data-testid="stSidebar"],
+        header[data-testid="stHeader"],
+        footer,
+        #MainMenu,
         .stDeployButton {
             display: none !important;
         }
         
-        /* Don't hide element containers - they contain our content */
-        /* Only hide if they are truly empty and have no children */
-        .element-container:empty:not(:has(> *)),
-        .stElementContainer:empty:not(:has(> *)) {
-            display: none !important;
+        /* Layout Container */
+        .block-container {
+            max-width: 1400px !important;
+            padding: 2rem 5rem !important;
+            margin: auto !important;
+        }
+
+        /* Typography */
+        h1, h2, h3 {
+            font-family: 'Playfair Display', serif !important;
+            color: #FFFFFF !important;
         }
         
-        /* Center content vertically and horizontally */
-        .main {
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
-            min-height: 100vh !important;
-            background: #0e1117 !important;
+        p, label, span, div {
+            color: #E0E0E0;
+            font-family: 'Inter', sans-serif;
         }
         
-        /* Style the main block container to look like login container */
-        .main .block-container {
-            max-width: 450px !important;
-            width: 100% !important;
-            padding: 50px !important;
-            margin: 0 auto !important;
-            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%) !important;
-            border-radius: 16px !important;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
-            border: 1px solid #404040 !important;
-            position: relative !important;
-            z-index: 1 !important;
+        /* Left Column Styles */
+        .brand-tag {
+            color: #FBB03B;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            margin-bottom: 1.5rem;
+            text-transform: uppercase;
         }
         
-        /* Don't hide empty divs - they might contain dynamically loaded content */
-        /* Let Streamlit handle its own layout */
-        
-        /* Ensure form elements are visible and transparent */
-        .main .element-container {
-            background: transparent !important;
+        .hero-title {
+            font-size: 4rem;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
         }
         
-        /* Style input fields to match the dark theme */
-        .stTextInput > div > div > input {
-            background-color: #2d2d2d !important;
-            color: #ffffff !important;
-            border: 1px solid #404040 !important;
+        .hero-italic {
+            font-family: 'Playfair Display', serif;
+            font-style: italic;
+            font-weight: 500;
         }
         
-        /* Style buttons to match dark theme */
-        .stButton > button {
-            background-color: #1f77b4 !important;
-            color: #ffffff !important;
-            border: none !important;
-        }
-        
-        .stButton > button:hover {
-            background-color: #1565a0 !important;
-        }
-        .stTextInput > div > div > input::placeholder {
-            color: #888 !important;
-        }
-        .stTextInput > div > div > input:focus {
-            border: 1px solid #1f77b4 !important;
-            box-shadow: 0 0 0 2px rgba(31, 119, 180, 0.2) !important;
-        }
-        .login-title {
-            color: #1f77b4;
-            text-align: center;
-            font-size: 2.5rem;
-            font-weight: bold;
-            margin-bottom: 10px;
-        }
-        .login-subtitle {
-            color: #b0b0b0;
-            text-align: center;
+        .hero-desc {
+            color: #888888 !important;
             font-size: 1.1rem;
-            margin-bottom: 40px;
+            line-height: 1.6;
+            max-width: 500px;
+            margin-bottom: 3rem;
         }
-        .logo-container {
-            width: 100%;
-            max-width: 400px;
-            min-height: 80px;
-            margin: 0 auto 30px auto;
-            background-color: #2d2d2d;
+        
+        .feature-row {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+            align-items: flex-start;
+        }
+        
+        .feature-icon {
+            background: rgba(255, 255, 255, 0.05);
+            width: 40px;
+            height: 40px;
             border-radius: 8px;
-            border: 1px solid #404040;
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 10px;
-            box-sizing: border-box;
+            color: #FBB03B;
+            font-size: 1.2rem;
+            flex-shrink: 0;
         }
-        .logo-container img {
-            max-width: 100%;
-            max-height: 60px;
-            width: auto;
-            height: auto;
-            object-fit: contain;
+        
+        .feature-text h4 {
+            font-family: 'Playfair Display', serif;
+            font-size: 1.1rem;
+            margin: 0 0 0.25rem 0;
+            color: #FFF !important;
+        }
+        
+        .feature-text p {
+            font-size: 0.85rem;
+            color: #666 !important;
+            margin: 0;
+            line-height: 1.4;
+        }
+        
+        /* Right Column (Login Card) Styles */
+        [data-testid="stForm"] {
+            background-color: #141414 !important;
+            border: 1px solid #2A2A2A !important;
+            border-radius: 16px !important;
+            padding: 3rem !important;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25) !important;
+        }
+        
+        .welcome-back {
+            color: #FBB03B;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            text-align: center;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            font-size: 2rem !important;
+        }
+        
+        .login-sub {
+            text-align: center;
+            color: #666 !important;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+            display: block;
+        }
+        
+        /* Input Fields */
+        .stTextInput input {
+            background-color: #1A1A1A !important;
+            border: 1px solid #333 !important;
+            color: white !important;
+            border-radius: 8px !important;
+            padding: 10px 15px !important;
+        }
+        
+        .stTextInput input:focus {
+            border-color: #FBB03B !important;
+            box-shadow: none !important;
+        }
+        
+        .stTextInput label {
+            display: none !important;
+        }
+        
+        /* Submit Button */
+        div[data-testid="stFormSubmitButton"] button {
+            background-color: #F9F9F9 !important; /* White button like mockup */
+            color: #000000 !important;
+            border: none !important;
+            border-radius: 8px !important;
+            padding: 8px 16px !important;
+            font-weight: 600 !important;
+            transition: all 0.2s;
+        }
+        
+        div[data-testid="stFormSubmitButton"] button:hover {
+            background-color: #FFFFFF !important;
+            transform: scale(1.01);
+        }
+        
+        .policy-text {
+            text-align: center;
+            font-size: 0.75rem;
+            color: #444 !important;
+            margin-top: 1.5rem;
         }
         </style>
     """, unsafe_allow_html=True)
     
-    # Hide sidebar using Streamlit's API
-    st.markdown(
-        """
-        <style>
-        section[data-testid="stSidebar"] {
-            display: none;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    # Layout Grid
+    # Add vertical spacing to center vertically roughly
+    st.markdown('<div style="height: 5vh;"></div>', unsafe_allow_html=True)
     
-    # Check if logo exists
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    logo_locations = [
-        os.path.join(BASE_DIR, "logo.jpg"),
-        os.path.join(BASE_DIR, "logo.png"),
-        os.path.join(BASE_DIR, "logo.JPG"),
-        os.path.join(BASE_DIR, "logo.PNG"),
-        os.path.join(BASE_DIR, "static", "logo.jpg"),
-        os.path.join(BASE_DIR, "static", "logo.png"),
-        os.path.join(BASE_DIR, "images", "logo.jpg"),
-        os.path.join(BASE_DIR, "images", "logo.png"),
-    ]
+    c1, spacer, c2 = st.columns([1.2, 0.2, 1])
     
-    logo_found = False
-    logo_path = None
-    for loc in logo_locations:
-        if os.path.exists(loc) and os.path.isfile(loc):
-            logo_path = loc
-            logo_found = True
-            break
-    
-    # Display logo or placeholder
-    if logo_found:
-        try:
-            from pathlib import Path
-            import base64
-            
-            with open(logo_path, "rb") as img_file:
-                img_data = base64.b64encode(img_file.read()).decode()
-                img_ext = Path(logo_path).suffix.lower().replace('.', '')
-                if img_ext == 'jpg':
-                    img_ext = 'jpeg'
-                img_mime = f"image/{img_ext}" if img_ext in ['jpeg', 'png', 'gif'] else "image/jpeg"
-                
-                logo_html = f"""
-                <div class="logo-container">
-                    <img src="data:{img_mime};base64,{img_data}" alt="Logo" style="max-width: 100%; max-height: 60px; object-fit: contain;">
-                </div>
-                """
-                st.markdown(logo_html, unsafe_allow_html=True)
-        except Exception as e:
-            print(f"Error loading logo: {str(e)}")
-            st.markdown('<div class="logo-container"></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="logo-container"></div>', unsafe_allow_html=True)
-    
-    st.markdown('<h1 class="login-title">⚙️ REimaginehome</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="login-subtitle">Content Creator Dashboard</p>', unsafe_allow_html=True)
-    
-    with st.form("login_form", clear_on_submit=False):
-        st.markdown('<label style="color: #ffffff; font-weight: 500; margin-bottom: 8px; display: block;">📧 Email Address *</label>', unsafe_allow_html=True)
-        email = st.text_input(
-            "Email Address", 
-            placeholder="your.email@example.com",
-            help="Enter your email address",
-            label_visibility="collapsed",
-            key="email_input"
-        )
-        st.markdown('<label style="color: #ffffff; font-weight: 500; margin-bottom: 8px; margin-top: 20px; display: block;">🔒 Password *</label>', unsafe_allow_html=True)
-        password = st.text_input(
-            "Password", 
-            type="password", 
-            placeholder="Enter password",
-            help="Enter the shared password",
-            label_visibility="collapsed",
-            key="password_input"
-        )
-        submitted = st.form_submit_button("🔐 Login", use_container_width=True, type="primary")
+    with c1:
+        # Brand
+        st.markdown("""
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 3rem;">
+            <div style="background-color: #FBB03B; color: black; font-weight: bold; padding: 4px 8px; border-radius: 4px;">CS</div>
+            <span style="font-weight: 600; font-size: 1.1rem; color: white;">CreatorStudio Pro</span>
+        </div>
+        """, unsafe_allow_html=True)
         
-        if submitted:
-            if not email or not email.strip():
-                st.error("❌ Please enter your email address")
-            elif not password:
-                st.error("❌ Please enter your password")
-            else:
-                is_valid, message = check_credentials(email, password)
-                if is_valid:
-                    user_email = email.strip().lower()
-                    login_time = datetime.now().isoformat()
-                    st.session_state['authenticated'] = True
-                    st.session_state['user_email'] = user_email
-                    st.session_state['login_time'] = login_time
-                    
-                    # Save to browser storage for persistence across refreshes
-                    _save_auth_to_storage(True, user_email, login_time)
-                    
-                    st.success(f"✅ {message}!")
-                    st.rerun()
+        # Hero Copy
+        st.markdown("""
+        <div class="brand-tag">CONTENT CREATION REIMAGINED</div>
+        <h1 class="hero-title">Transform blogs into <span class="hero-italic">viral</span> video scripts</h1>
+        <p class="hero-desc">
+            The premium platform for content creators. Leverage AI to generate engaging scripts and publish across all major platforms seamlessly.
+        </p>
+        """, unsafe_allow_html=True)
+        
+        # Features
+        st.markdown("""
+        <div class="feature-row">
+            <div class="feature-icon">✨</div>
+            <div class="feature-text">
+                <h4>AI Script Generation</h4>
+                <p>Transform any blog into compelling video scripts instantly</p>
+            </div>
+        </div>
+        <div class="feature-row">
+            <div class="feature-icon">🌐</div>
+            <div class="feature-text">
+                <h4>Multi-Platform Publishing</h4>
+                <p>Reach YouTube, TikTok, and Instagram simultaneously</p>
+            </div>
+        </div>
+        <div class="feature-row">
+            <div class="feature-icon">⚡</div>
+            <div class="feature-text">
+                <h4>Streamlined Workflow</h4>
+                <p>From idea to published content in minutes, not hours</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        # Login Form Card
+        # Centering container for the card
+        st.markdown('<div style="padding-top: 2rem;"></div>', unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            st.markdown("""
+            <div class="welcome-back">WELCOME BACK</div>
+            <h2 class="login-header">Sign In</h2>
+            <span class="login-sub">Access your creative workspace</span>
+            """, unsafe_allow_html=True)
+            
+            # Inputs
+            # We don't need labels visible due to CSS hiding them, but good to have for access
+            email = st.text_input("Email", placeholder="name@example.com", key="login_email")
+            password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
+            
+            st.markdown('<div style="margin-bottom: 1.5rem;"></div>', unsafe_allow_html=True)
+            
+            # Submit
+            # Using custom text for the button to match "Continue with..." style if needed, 
+            # or just "Sign In" as per user request ("google sign in... keep email/pass")
+            # User said "ignore google sign in... keep same flow... theme exactly like this"
+            # So I will make the button look like the white button but say "Sign In"
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
+            
+            st.markdown("""
+            <div class="policy-text">
+                By continuing, you agree to our Terms of Service and Privacy Policy
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if submitted:
+                if not email or not email.strip():
+                    st.error("Please enter your email")
+                elif not password:
+                    st.error("Please enter your password")
                 else:
-                    st.error(f"❌ {message}")
+                    is_valid, message = check_credentials(email, password)
+                    if is_valid:
+                        user_email = email.strip().lower()
+                        login_time = datetime.now().isoformat()
+                        st.session_state['authenticated'] = True
+                        st.session_state['user_email'] = user_email
+                        st.session_state['login_time'] = login_time
+                        _save_auth_to_storage(True, user_email, login_time)
+                        st.rerun()
+                    else:
+                        st.error(message)
 
 def is_authenticated():
     """Check if user is authenticated"""
