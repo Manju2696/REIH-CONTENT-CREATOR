@@ -989,6 +989,14 @@ OR for a single script:
             else:
                 st.error("Blog URL is required!")
     
+    # Get all blog URLs with their scripts (include _object_id for reliable updates)
+    # Order by updated_at DESC so newly generated scripts appear at the top
+    blog_urls = db.execute_query("""
+        SELECT id, _object_id, url, status, scripts_generated, created_at, updated_at, notes
+        FROM blog_urls
+        ORDER BY updated_at DESC, created_at DESC
+    """)
+    
     # Display table of blog URLs and scripts
     st.markdown('<div style="margin-top: 4rem;"></div>', unsafe_allow_html=True)
     st.markdown('<h2 style="font-family: \'Playfair Display\', serif; font-size: 2rem; margin-bottom: 0.5rem;">Generated Scripts</h2>', unsafe_allow_html=True)
@@ -1085,13 +1093,7 @@ OR for a single script:
         st.session_state.retry_all_failed = False
         st.rerun()
     
-    # Get all blog URLs with their scripts (include _object_id for reliable updates)
-    # Order by updated_at DESC so newly generated scripts appear at the top
-    blog_urls = db.execute_query("""
-        SELECT id, _object_id, url, status, scripts_generated, created_at, updated_at, notes
-        FROM blog_urls
-        ORDER BY updated_at DESC, created_at DESC
-    """)
+
     
     if not blog_urls:
         st.markdown("""
