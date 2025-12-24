@@ -251,6 +251,63 @@ def show_login():
         }
         </style>
     """, unsafe_allow_html=True)
+
+    # -------------------------------------------------------------------------
+    # Background Image Logic
+    # -------------------------------------------------------------------------
+    import base64
+    def get_base64_of_bin_file(bin_file):
+        with open(bin_file, 'rb') as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+
+    # Look for the background image in assets
+    bg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "login_bg.png")
+    
+    if os.path.exists(bg_path):
+        try:
+            bin_str = get_base64_of_bin_file(bg_path)
+            # Add a pseudo-element to .stApp for the background image
+            # We use a pseudo-element so we can apply a blur filter without blurring the content (text/forms)
+            st.markdown(
+                f"""
+                <style>
+                .stApp {{
+                    /* Fallback background color */
+                    background-color: #0E0E0E !important; 
+                    position: relative;
+                }}
+                
+                .stApp::before {{
+                    content: "";
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    /* The background image */
+                    background-image: url("data:image/png;base64,{bin_str}");
+                    background-size: cover;
+                    background-position: center;
+                    background-repeat: no-repeat;
+                    /* Blur effect */
+                    filter: blur(8px) brightness(0.4); 
+                    z-index: 0; /* Behind everything */
+                    pointer-events: none; /* Let clicks pass through */
+                }}
+                
+                /* Ensure content sits on top of the background */
+                .block-container {{
+                    position: relative; 
+                    z-index: 1;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+        except Exception as bg_err:
+            print(f"Error loading background image: {bg_err}")
+    # -------------------------------------------------------------------------
     
     # Layout Grid
     # Add vertical spacing to center vertically roughly
