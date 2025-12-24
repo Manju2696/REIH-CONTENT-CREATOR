@@ -6,7 +6,7 @@ Serves TikTok site verification for API access
 import streamlit as st
 
 # This page serves TikTok verification without requiring authentication
-# Access via: https://your-app.streamlit.app/tiktok_verification
+# Access via: https://reih-content-creator-4leuhlnaasfsjsxztqu5wj.streamlit.app/tiktok_verification
 
 st.set_page_config(
     page_title="TikTok Verification",
@@ -15,4 +15,4 @@ st.set_page_config(
 )
 
 # Display verification code
-st.text("tiktok-developers-site-verification=bqZQEcY8URUXYHVv3NPmLn68KUidkxHX")
+st.text("tiktok-developers-site-verification=Cy4tDcp3iWu388XGtTIUGXRzUlVYR7Se")
