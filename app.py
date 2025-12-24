@@ -18,7 +18,8 @@ from pages import (
     settings_page,
     reimaginehome_tv_page,
     terms_of_service,
-    privacy_policy
+    privacy_policy,
+    dashboard_page
 )
 
 # Page configuration
@@ -63,7 +64,7 @@ import utils.ui_components as ui
 
 # Initialize page selection in session state
 if 'page' not in st.session_state:
-    st.session_state.page = "📝 Generate Scripts"
+    st.session_state.page = "🏠 Dashboard"
 
 # Render Top Navigation
 ui.render_top_nav(st.session_state.page)
@@ -73,7 +74,9 @@ ui.render_top_nav(st.session_state.page)
 
 # Show selected page
 try:
-    if st.session_state.page == "📝 Generate Scripts":
+    if st.session_state.page == "🏠 Dashboard":
+        dashboard_page.show()
+    elif st.session_state.page == "📝 Generate Scripts":
         generate_scripts_page.show()
     elif st.session_state.page == "📤 Upload Video":
         upload_video_page.show()
@@ -88,16 +91,15 @@ try:
     elif st.session_state.page == "🔒 Privacy Policy":
         privacy_policy.show()
     else:
-        # Default to Generate Scripts if page state is invalid
-        st.session_state.page = "📝 Generate Scripts"
-        generate_scripts_page.show()
+        # Default to Dashboard if page state is invalid
+        st.session_state.page = "🏠 Dashboard"
+        dashboard_page.show()
 except Exception as e:
     st.error(f"Error loading page: {str(e)}")
     st.exception(e)
-    # Fallback to Generate Scripts page
-    st.session_state.page = "📝 Generate Scripts"
+    # Fallback to Dashboard page
+    st.session_state.page = "🏠 Dashboard"
     try:
-        generate_scripts_page.show()
+        dashboard_page.show()
     except:
         st.error("Unable to load any page. Please refresh the app.")
-

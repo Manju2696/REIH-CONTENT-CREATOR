@@ -149,9 +149,138 @@ header[data-testid="stHeader"] {
     margin-bottom: 0.5rem;
 }
 
+
 .empty-text {
     color: var(--text-secondary);
     font-size: 0.9rem;
+}
+
+/* Dashboard Styling */
+.dashboard-header {
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background-color: var(--card-bg);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.stat-icon-wrapper {
+    background-color: rgba(255, 255, 255, 0.05);
+    width: 50px;
+    height: 50px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: var(--accent-color);
+}
+
+.stat-value {
+    font-family: 'Playfair Display', serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--text-primary);
+}
+
+.stat-label {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 5px;
+}
+
+.action-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem;
+    height: 100%;
+    transition: transform 0.2s, border-color 0.2s;
+    cursor: pointer;
+}
+
+.action-card:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-2px);
+}
+
+.action-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    margin-bottom: 1.5rem;
+    font-weight: bold;
+}
+
+.action-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+.action-desc {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.5;
+}
+
+.action-link {
+    color: var(--accent-color);
+    font-size: 0.9rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.workflow-step {
+    border-top: 1px solid var(--border-color);
+    padding-top: 1.5rem;
+}
+
+.step-num {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #2D2D2D;
+    margin-bottom: 0.5rem;
+}
+
+.step-title {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.step-desc {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.cta-banner {
+    background: linear-gradient(135deg, rgba(20,20,20,1) 0%, rgba(30,30,30,1) 100%);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 3rem;
+    margin: 3rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 </style>
 """

@@ -13,12 +13,15 @@ def render_top_nav(current_page):
     c1, c2, c3 = st.columns([2, 6, 2])
     
     with c1:
-        st.markdown("""
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <div style="background-color: #FBB03B; color: black; font-weight: bold; padding: 4px 8px; border-radius: 4px;">CS</div>
-            <span style="font-weight: 600; font-size: 1.1rem; color: white;">CreatorStudio Pro</span>
-        </div>
-        """, unsafe_allow_html=True)
+        # Logo/Brand - Make it clickable via a transparent button overlay or just a button
+        # Streamlit doesn't support clickable divs easily. 
+        # We'll use a button that looks like the brand?
+        # Or just a button "Dashboard" next to it?
+        
+        # New Approach: Use a button for the brand
+        if st.button("CS CreatorStudio Pro", key="nav_home", type="secondary", use_container_width=True):
+            st.session_state.page = "🏠 Dashboard"
+            st.rerun()
         
     with c2:
         # Navigation Links
