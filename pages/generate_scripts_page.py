@@ -68,14 +68,21 @@ def upload_to_storage(file_bytes: bytes, filename: str, resource_type: str = 'vi
     return local_path, 'local', None
 
 def show():
-    st.title("📝 Generate Scripts")
+    # Header Section matching CreatorStudio Pro design
+    st.markdown("""
+    <div style="margin-bottom: 3rem; margin-top: 1rem;">
+        <div style="color: #FBB03B; font-size: 0.75rem; font-weight: 700; letter-spacing: 1.5px; margin-bottom: 0.75rem; text-transform: uppercase;">Script Generator</div>
+        <h1 style="font-family: 'Playfair Display', serif; font-size: 3.5rem; margin: 0 0 1rem 0; line-height: 1.1; font-weight: 500;">Generate Video Scripts</h1>
+        <p style="color: #888; font-size: 1.1rem; margin: 0; max-width: 600px; line-height: 1.6;">
+            Transform any blog article into engaging, platform-ready video scripts using AI-powered generation.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Show storage status indicator
-    cloudinary_creds = config.get_cloudinary_credentials()
-    if cloudinary_creds and cloudinary_creds.get('cloud_name'):
-        st.info(f"☁️ **Storage:** Cloudinary (Cloud: `{cloudinary_creds['cloud_name']}`) - Videos will be stored in the cloud")
-    else:
-        st.warning("💾 **Storage:** Local - Videos will be stored on your computer. Configure Cloudinary in Settings to use cloud storage.")
+    # Show storage status indicator (hidden/subtle in new design or moved to settings? Keeping it subtle)
+    # cloudinary_creds = config.get_cloudinary_credentials()
+    # if cloudinary_creds and cloudinary_creds.get('cloud_name'):
+    #    st.toast(f"☁️ Storage: Cloudinary ({cloudinary_creds['cloud_name']})")
     
     # Initialize session state for persistent errors
     if 'blog_errors' not in st.session_state:
@@ -162,7 +169,7 @@ def show():
                     st.markdown("**Output Format:**")
                     st.text_area("Output Format", value=selected_master_prompt.get('output_format', ''), height=100, disabled=True, label_visibility="collapsed")
         
-        submitted = st.form_submit_button("Generate Scripts", use_container_width=True, type="primary")
+        submitted = st.form_submit_button("✨ Generate Scripts", use_container_width=True, type="primary")
         
         if submitted:
             if blog_url:
@@ -983,8 +990,13 @@ OR for a single script:
                 st.error("Blog URL is required!")
     
     # Display table of blog URLs and scripts
-    st.divider()
-    st.subheader("📊 Generated Scripts")
+    st.markdown('<div style="margin-top: 4rem;"></div>', unsafe_allow_html=True)
+    st.markdown('<h2 style="font-family: \'Playfair Display\', serif; font-size: 2rem; margin-bottom: 0.5rem;">Generated Scripts</h2>', unsafe_allow_html=True)
+    if blog_urls:
+        st.caption(f"{len(blog_urls)} blogs processed")
+    else:
+        st.caption("0 blogs processed")
+    # st.subheader("📊 Generated Scripts")
     
     # Handle delete operations first (before displaying the table)
     if 'delete_blog' in st.session_state and st.session_state.delete_blog:
@@ -1082,7 +1094,13 @@ OR for a single script:
     """)
     
     if not blog_urls:
-        st.info("ℹ️ No blog URLs added yet. Add a blog URL above to generate scripts.")
+        st.markdown("""
+        <div class="empty-state">
+            <div class="empty-icon">📄</div>
+            <div class="empty-title">No scripts yet</div>
+            <div class="empty-text">Generate your first script by entering a blog URL above and clicking Generate.</div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
         # Check if there are any failed scripts
         failed_scripts_count = 0
