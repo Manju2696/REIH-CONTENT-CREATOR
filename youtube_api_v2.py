@@ -36,7 +36,9 @@ except ImportError:
     LIBRARIES_AVAILABLE = False
     print("Warning: Google API libraries not installed. Run: pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
 
-# OAuth 2.0 scopes
+# OAuth 2.0 scopes - only use youtube.upload for video uploads
+# NOTE: Additional scopes like youtube.readonly or youtube.force-ssl 
+# must be added to Google Cloud Console OAuth consent screen first
 SCOPES = ['https://www.googleapis.com/auth/youtube.upload']
 
 def get_redirect_uri() -> str:

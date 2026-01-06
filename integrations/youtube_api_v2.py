@@ -26,10 +26,10 @@ except ImportError:
     GOOGLE_LIBS_AVAILABLE = False
 
 
+# OAuth 2.0 scopes - only use youtube.upload for video uploads
+# NOTE: Additional scopes require configuration in Google Cloud Console OAuth consent screen
 SCOPES: List[str] = [
     "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube.readonly",
-    "https://www.googleapis.com/auth/youtube.force-ssl",
 ]
 
 BASE_DIR = Path(__file__).resolve().parent.parent
