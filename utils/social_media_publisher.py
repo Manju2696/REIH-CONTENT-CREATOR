@@ -60,7 +60,7 @@ def publish_to_youtube(
             description=description or "",
             tags=tags,
             category_id="22",  # People & Blogs
-            privacy_status="unlisted",  # Upload as unlisted by default
+            privacy_status="public",  # Upload as public
             thumbnail_file_path=thumbnail_file_path  # Pass thumbnail if provided
         )
         
