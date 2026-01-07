@@ -394,7 +394,7 @@ def upload_video_to_youtube(
     description: str = "",
     tags: list = None,
     category_id: str = "22",
-    privacy_status: str = "unlisted",
+    privacy_status: str = "public",
     thumbnail_file_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
