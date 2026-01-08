@@ -606,43 +606,52 @@ def show():
                 # Publish Column
                 with row_cols[6]:
                     with st.expander("🚀 Publish", expanded=False):
-                        st.markdown("**Select Platform:**")
+                        st.markdown("**Select Platforms:**")
                         
-                        platform = st.radio(
-                            "Platform",
-                            ["All", "YouTube", "Instagram", "Facebook", "TikTok", "REih TV"],
-                            key=f"platform_{video_id}",
+                        # Define all platforms
+                        all_platforms = ["YouTube", "Instagram", "Facebook", "TikTok", "REih TV"]
+                        
+                        selected_platforms = st.multiselect(
+                            "Select platforms to publish to:",
+                            all_platforms,
+                            key=f"platform_select_{video_id}",
                             label_visibility="collapsed"
                         )
                         
                         st.markdown("---")
                         
-                        # Define all platforms
-                        all_platforms = ["YouTube", "Instagram", "Facebook", "TikTok", "REih TV"]
-                        
-                        # Handle "All" platform selection
-                        if platform == "All":
-                            # Check if publishing to all platforms
-                            all_publish_key = f"publish_all_{video_id}"
-                            all_publish_status_key = f"publish_all_status_{video_id}"
+                        if not selected_platforms:
+                            st.info("Select at least one platform to publish.")
+                        else:
+                            # Check status for selected platforms
+                            any_publishing = any(st.session_state.get(f"publish_status_{video_id}_{p}") == 'publishing' for p in selected_platforms)
+                            all_success = len(selected_platforms) > 0 and all(st.session_state.get(f"publish_status_{video_id}_{p}") == 'success' for p in selected_platforms)
+                            any_error = any(st.session_state.get(f"publish_status_{video_id}_{p}") == 'error' for p in selected_platforms)
                             
-                            # Check status for all platforms
-                            all_publishing = any(st.session_state.get(f"publish_status_{video_id}_{p}") == 'publishing' for p in all_platforms)
-                            all_success = all(st.session_state.get(f"publish_status_{video_id}_{p}") == 'success' for p in all_platforms)
-                            any_error = any(st.session_state.get(f"publish_status_{video_id}_{p}") == 'error' for p in all_platforms)
+                            # Multi-platform publishing logic
+                            multi_publish_key = f"publish_multi_{video_id}"
                             
-                            if all_publishing:
-                                st.warning("⏳ Publishing to all platforms...")
-                                st.info("Please wait, this may take several minutes.")
+                            if any_publishing:
+                                st.warning("⏳ Publishing in progress...")
+                                st.info("Please wait, this may take a few minutes.")
+                            
                             elif all_success:
-                                st.success("✅ Published to all platforms!")
-                                if st.button("🔄 Publish Again", key=f"republish_all_{video_id}", use_container_width=True):
-                                    for p in all_platforms:
+                                st.success("✅ Published to all selected platforms!")
+                                
+                                # Show published URLs
+                                for p in selected_platforms:
+                                    published_url = st.session_state.get(f"publish_url_{video_id}_{p}")
+                                    if published_url:
+                                        st.markdown(f"🔗 **{p}**: [View Video]({published_url})")
+                                
+                                if st.button("🔄 Publish Again", key=f"republish_multi_{video_id}", use_container_width=True):
+                                    for p in selected_platforms:
                                         st.session_state[f"publish_status_{video_id}_{p}"] = None
                                     st.rerun()
+                                    
                             elif any_error:
                                 # Show status for each platform
-                                for p in all_platforms:
+                                for p in selected_platforms:
                                     status = st.session_state.get(f"publish_status_{video_id}_{p}")
                                     if status == 'success':
                                         st.success(f"✅ {p}")
@@ -652,15 +661,17 @@ def show():
                                     else:
                                         st.info(f"⏸️ {p}: Not published")
                                 
-                                if st.button("🔄 Retry Failed", key=f"retry_all_{video_id}", use_container_width=True):
-                                    for p in all_platforms:
+                                if st.button("🔄 Retry Failed", key=f"retry_multi_{video_id}", use_container_width=True):
+                                    for p in selected_platforms:
                                         if st.session_state.get(f"publish_status_{video_id}_{p}") == 'error':
                                             st.session_state[f"publish_status_{video_id}_{p}"] = None
                                     st.rerun()
+                            
                             else:
+                                # Ready to publish
                                 if st.button(
-                                    "📤 Publish to All Platforms",
-                                    key=all_publish_key,
+                                    f"📤 Publish to {len(selected_platforms)} Platform(s)",
+                                    key=multi_publish_key,
                                     use_container_width=True,
                                     type="primary"
                                 ):
@@ -671,60 +682,54 @@ def show():
                                     elif not title or title == 'N/A':
                                         st.error("❌ Title is required!")
                                     else:
-                                        # Import publisher
-                                        try:
-                                            from utils.social_media_publisher import publish_to_platform
-                                            
-                                            # Prepare data
-                                            publish_description = description if description != 'N/A' else ""
-                                            publish_keywords = keywords if keywords != 'N/A' else ""
-                                            publish_transcription = transcription if transcription != 'N/A' else None
-                                            
-                                            # Set all platforms to publishing
-                                            for p in all_platforms:
-                                                st.session_state[f"publish_status_{video_id}_{p}"] = 'publishing'
-                                            
-                                            # Store publish request in session state to process on next rerun
-                                            # Check if thumbnail is URL or local file
-                                            is_cloudinary_thumb = isinstance(thumbnail_file_path, str) and ('res.cloudinary.com' in thumbnail_file_path or thumbnail_file_path.startswith('http'))
-                                            valid_thumbnail = thumbnail_file_path and (is_cloudinary_thumb or os.path.exists(thumbnail_file_path))
-                                            
-                                            st.session_state[f"publish_all_request_{video_id}"] = {
-                                                'video_file_path': video_file_path,
-                                                'thumbnail_file_path': thumbnail_file_path if valid_thumbnail else None,
-                                                'title': title,
-                                                'description': publish_description,
-                                                'keywords': publish_keywords,
-                                                'transcription': publish_transcription
-                                            }
-                                            st.rerun()
-                                            
-                                        except ImportError as e:
-                                            for p in all_platforms:
-                                                st.session_state[f"publish_status_{video_id}_{p}"] = 'error'
-                                                st.session_state[f"publish_error_{video_id}_{p}"] = f"Import error: {str(e)}"
-                                            st.rerun()
-                                        except Exception as e:
-                                            for p in all_platforms:
-                                                st.session_state[f"publish_status_{video_id}_{p}"] = 'error'
-                                                st.session_state[f"publish_error_{video_id}_{p}"] = f"Error: {str(e)}"
-                                            st.rerun()
+                                        # Set status to publishing for all selected
+                                        for p in selected_platforms:
+                                            st.session_state[f"publish_status_{video_id}_{p}"] = 'publishing'
+                                        
+                                        # Store publish request
+                                        # Check if thumbnail is URL or local file
+                                        is_cloudinary_thumb = isinstance(thumbnail_file_path, str) and ('res.cloudinary.com' in thumbnail_file_path or thumbnail_file_path.startswith('http'))
+                                        valid_thumbnail = thumbnail_file_path and (is_cloudinary_thumb or os.path.exists(thumbnail_file_path))
+                                        
+                                        publish_description = description if description != 'N/A' else ""
+                                        publish_keywords = keywords if keywords != 'N/A' else ""
+                                        publish_transcription = transcription if transcription != 'N/A' else None
+                                        
+                                        st.session_state[f"publish_multi_request_{video_id}"] = {
+                                            'platforms': selected_platforms,
+                                            'video_file_path': video_file_path,
+                                            'thumbnail_file_path': thumbnail_file_path if valid_thumbnail else None,
+                                            'title': title,
+                                            'description': publish_description,
+                                            'keywords': publish_keywords,
+                                            'transcription': publish_transcription
+                                        }
+                                        st.rerun()
                             
-                            # Process "All" publish request if exists
-                            if st.session_state.get(f"publish_all_request_{video_id}"):
-                                request_data = st.session_state[f"publish_all_request_{video_id}"]
-                                del st.session_state[f"publish_all_request_{video_id}"]
+                            # Process Multi-platform Publish Request
+                            if st.session_state.get(f"publish_multi_request_{video_id}"):
+                                request_data = st.session_state[f"publish_multi_request_{video_id}"]
+                                # Only process if the request matches current selection (or just process what is in request)
+                                platforms_to_publish = request_data['platforms']
                                 
-                                # Publish to all platforms sequentially
+                                # Remove request from session state so we don't loop
+                                del st.session_state[f"publish_multi_request_{video_id}"]
+                                
+                                # Publish logic
                                 progress_bar = st.progress(0)
                                 status_text = st.empty()
                                 
-                                results = {}
-                                for idx, p in enumerate(all_platforms):
+                                from utils.social_media_publisher import publish_to_platform
+                                
+                                for idx, p in enumerate(platforms_to_publish):
                                     try:
-                                        status_text.text(f"📤 Publishing to {p}... ({idx+1}/{len(all_platforms)})")
-                                        progress_bar.progress((idx + 1) / len(all_platforms))
+                                        status_text.text(f"📤 Publishing to {p}... ({idx+1}/{len(platforms_to_publish)})")
+                                        progress_bar.progress((idx + 1) / len(platforms_to_publish))
                                         
+                                        # Skip if already succeeded (unless retrying which clears status)
+                                        if st.session_state.get(f"publish_status_{video_id}_{p}") == 'success':
+                                            continue
+                                            
                                         result = publish_to_platform(
                                             platform=p,
                                             video_file_path=request_data['video_file_path'],
@@ -734,9 +739,7 @@ def show():
                                             keywords=request_data['keywords'],
                                             transcription=request_data['transcription']
                                         )
-                                        results[p] = result
                                         
-                                        # Update status
                                         if result.get('success'):
                                             st.session_state[f"publish_status_{video_id}_{p}"] = 'success'
                                             if result.get('video_url'):
@@ -744,128 +747,20 @@ def show():
                                         else:
                                             st.session_state[f"publish_status_{video_id}_{p}"] = 'error'
                                             st.session_state[f"publish_error_{video_id}_{p}"] = result.get('error', 'Unknown error')
+                                            
                                     except Exception as e:
                                         st.session_state[f"publish_status_{video_id}_{p}"] = 'error'
                                         st.session_state[f"publish_error_{video_id}_{p}"] = f"Error: {str(e)}"
                                 
                                 progress_bar.empty()
                                 status_text.empty()
-                                
-                                # Show summary
-                                success_count = sum(1 for p in all_platforms if st.session_state.get(f"publish_status_{video_id}_{p}") == 'success')
-                                error_count = sum(1 for p in all_platforms if st.session_state.get(f"publish_status_{video_id}_{p}") == 'error')
-                                
-                                if success_count == len(all_platforms):
-                                    st.success(f"✅ Successfully published to all {len(all_platforms)} platforms!")
-                                elif success_count > 0:
-                                    st.warning(f"⚠️ Published to {success_count}/{len(all_platforms)} platforms. {error_count} failed.")
-                                else:
-                                    st.error(f"❌ Failed to publish to all platforms.")
-                                
                                 st.rerun()
                             
-                            # Show published URLs for all platforms
-                            for p in all_platforms:
+                            # Check for any success URLs to display (even if some failed)
+                            for p in selected_platforms:
                                 published_url = st.session_state.get(f"publish_url_{video_id}_{p}")
                                 if published_url:
-                                    st.markdown(f"🔗 [{p}]({published_url})")
-                        
-                        else:
-                            # Single platform publishing (existing logic)
-                            publish_key = f"publish_{video_id}_{platform}"
-                            publish_status_key = f"publish_status_{video_id}_{platform}"
-                            
-                            # Check if publishing is in progress
-                            if st.session_state.get(publish_status_key) == 'publishing':
-                                st.warning(f"⏳ Publishing to {platform}...")
-                                st.info("Please wait, this may take a few minutes.")
-                            elif st.session_state.get(publish_status_key) == 'success':
-                                st.success(f"✅ Published to {platform}!")
-                                if st.button("🔄 Publish Again", key=f"republish_{video_id}_{platform}", use_container_width=True):
-                                    st.session_state[publish_status_key] = None
-                                    st.rerun()
-                            elif st.session_state.get(publish_status_key) == 'error':
-                                error_msg = st.session_state.get(f"publish_error_{video_id}_{platform}", "Unknown error")
-                                st.error(f"❌ Failed: {error_msg}")
-                                if st.button("🔄 Retry", key=f"retry_{video_id}_{platform}", use_container_width=True):
-                                    st.session_state[publish_status_key] = None
-                                    st.rerun()
-                            else:
-                                if st.button(
-                                    f"📤 Publish to {platform}",
-                                    key=publish_key,
-                                    use_container_width=True,
-                                    type="primary"
-                                ):
-                                    # Validate required data
-                                    is_cloudinary_url = isinstance(video_file_path, str) and 'res.cloudinary.com' in video_file_path
-                                    if not video_file_path or (not is_cloudinary_url and not os.path.exists(video_file_path)):
-                                        st.error("❌ Video file not found!")
-                                    elif not title or title == 'N/A':
-                                        st.error("❌ Title is required!")
-                                    else:
-                                        # Set publishing status
-                                        st.session_state[publish_status_key] = 'publishing'
-                                        
-                                        # Import publisher
-                                        try:
-                                            from utils.social_media_publisher import publish_to_platform
-                                            
-                                            # Prepare data
-                                            publish_description = description if description != 'N/A' else ""
-                                            publish_keywords = keywords if keywords != 'N/A' else ""
-                                            publish_transcription = transcription if transcription != 'N/A' else None
-                                            
-                                            # Show progress
-                                            with st.spinner(f"📤 Publishing to {platform}... This may take a few minutes."):
-                                                # Check if thumbnail is URL or local file
-                                                is_cloudinary_thumb = isinstance(thumbnail_file_path, str) and ('res.cloudinary.com' in thumbnail_file_path or thumbnail_file_path.startswith('http'))
-                                                valid_thumbnail = thumbnail_file_path and (is_cloudinary_thumb or os.path.exists(thumbnail_file_path))
-                                                
-                                                # Publish to platform
-                                                result = publish_to_platform(
-                                                    platform=platform,
-                                                    video_file_path=video_file_path,
-                                                    thumbnail_file_path=thumbnail_file_path if valid_thumbnail else None,
-                                                    title=title,
-                                                    description=publish_description,
-                                                    keywords=publish_keywords,
-                                                    transcription=publish_transcription
-                                                )
-                                            
-                                            # Update status
-                                            if result.get('success'):
-                                                st.session_state[publish_status_key] = 'success'
-                                                if result.get('video_url'):
-                                                    st.session_state[f"publish_url_{video_id}_{platform}"] = result.get('video_url')
-                                                st.success(f"✅ Successfully published to {platform}!")
-                                                if result.get('video_url'):
-                                                    st.info(f"🔗 Video URL: {result.get('video_url')}")
-                                            else:
-                                                st.session_state[publish_status_key] = 'error'
-                                                error_msg = result.get('error', 'Unknown error')
-                                                st.session_state[f"publish_error_{video_id}_{platform}"] = error_msg
-                                                st.error(f"❌ Failed to publish: {error_msg}")
-                                            
-                                            st.rerun()
-                                            
-                                        except ImportError as e:
-                                            st.session_state[publish_status_key] = 'error'
-                                            error_msg = f"Import error: {str(e)}"
-                                            st.session_state[f"publish_error_{video_id}_{platform}"] = error_msg
-                                            st.error(f"❌ {error_msg}")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.session_state[publish_status_key] = 'error'
-                                            error_msg = f"Error: {str(e)}"
-                                            st.session_state[f"publish_error_{video_id}_{platform}"] = error_msg
-                                            st.error(f"❌ {error_msg}")
-                                            st.rerun()
-                            
-                            # Show published URL if available
-                            published_url = st.session_state.get(f"publish_url_{video_id}_{platform}")
-                            if published_url:
-                                st.markdown(f"🔗 [View on {platform}]({published_url})")
+                                    st.markdown(f"🔗 **{p}**: [View]({published_url})")
                 
                 # Delete Column
                 with row_cols[7]:
