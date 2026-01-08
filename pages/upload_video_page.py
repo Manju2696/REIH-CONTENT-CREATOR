@@ -5,12 +5,14 @@ Allows users to upload videos with metadata and publish to multiple platforms
 
 import streamlit as st
 import os
+import tempfile
 from datetime import datetime
 import database.db_setup as db
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 import re
+from utils.video_frame_extractor import extract_frames_from_video
 
 def extract_cloudinary_public_id(cloudinary_url: str) -> str:
     """
@@ -78,29 +80,124 @@ def delete_file_from_storage(file_path: str):
             except Exception as e:
                 print(f"[WARNING] Could not delete local file: {str(e)}")
 
+
+@st.dialog("🎬 Select Thumbnail from Video Frames", width="large")
+def select_thumbnail_dialog():
+    """Popup dialog to select a thumbnail from extracted video frames"""
+    
+    if 'extracted_frames' not in st.session_state or not st.session_state['extracted_frames']:
+        st.warning("⚠️ No frames available. Please upload a video first.")
+        return
+    
+    frames = st.session_state['extracted_frames']
+    
+    st.markdown("**Click on a frame to select it as the thumbnail:**")
+    st.markdown("---")
+    
+    # Display frames in a 5-column grid
+    cols = st.columns(5)
+    for idx, frame_path in enumerate(frames):
+        with cols[idx]:
+            st.image(frame_path, use_container_width=True, caption=f"Frame {idx + 1}")
+            if st.button(f"✓ Select", key=f"select_frame_{idx}", use_container_width=True):
+                # Read the frame file and store in session state
+                with open(frame_path, 'rb') as f:
+                    frame_bytes = f.read()
+                st.session_state['selected_thumbnail_frame_bytes'] = frame_bytes
+                st.session_state['selected_thumbnail_frame_index'] = idx
+                st.session_state['selected_thumbnail_frame_path'] = frame_path
+                st.success(f"✅ Frame {idx + 1} selected!")
+                st.rerun()
+
+
 def show():
     st.title("📤 Upload Video")
+    
+    # Initialize session state for upload form
+    if 'upload_video_bytes' not in st.session_state:
+        st.session_state['upload_video_bytes'] = None
+    if 'upload_video_name' not in st.session_state:
+        st.session_state['upload_video_name'] = None
+    if 'extracted_frames' not in st.session_state:
+        st.session_state['extracted_frames'] = []
+    if 'selected_thumbnail_frame_bytes' not in st.session_state:
+        st.session_state['selected_thumbnail_frame_bytes'] = None
     
     # Upload Form Section
     st.markdown("### 📝 Upload New Video")
     
+    # Step 1: Video Upload (outside form for frame extraction to work)
+    uploaded_video = st.file_uploader(
+        "📹 Upload Video",
+        type=['mp4', 'mov', 'avi', 'mkv'],
+        help="Upload your video file (MP4, MOV, AVI, MKV)",
+        key="video_uploader"
+    )
+    
+    # Handle video upload and frame extraction
+    if uploaded_video is not None:
+        # Check if this is a new video
+        if st.session_state.get('upload_video_name') != uploaded_video.name:
+            st.session_state['upload_video_bytes'] = uploaded_video.getvalue()
+            st.session_state['upload_video_name'] = uploaded_video.name
+            st.session_state['extracted_frames'] = []
+            st.session_state['selected_thumbnail_frame_bytes'] = None
+            st.session_state['selected_thumbnail_frame_index'] = None
+            st.session_state['selected_thumbnail_frame_path'] = None
+            
+            # Extract frames from video
+            with st.spinner("🎬 Extracting frames from video..."):
+                try:
+                    # Save video to temp file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                        tmp.write(uploaded_video.getvalue())
+                        temp_video_path = tmp.name
+                    
+                    # Extract 5 frames
+                    frames = extract_frames_from_video(temp_video_path, num_frames=5)
+                    st.session_state['extracted_frames'] = frames
+                    st.session_state['temp_video_path'] = temp_video_path
+                    st.success(f"✅ Extracted {len(frames)} frames from video")
+                except Exception as e:
+                    st.warning(f"⚠️ Could not extract frames: {str(e)}. You can still upload a custom thumbnail.")
+    
+    # Step 2: Thumbnail Selection
+    st.markdown("---")
+    st.markdown("#### 🖼️ Thumbnail Selection")
+    
+    col_thumb1, col_thumb2 = st.columns(2)
+    
+    with col_thumb1:
+        # Button to open frame selection dialog
+        frames_available = len(st.session_state.get('extracted_frames', [])) > 0
+        if frames_available:
+            if st.button("🎬 Select from Video Frames", use_container_width=True, type="secondary"):
+                select_thumbnail_dialog()
+            
+            # Show selected frame preview
+            if st.session_state.get('selected_thumbnail_frame_path'):
+                st.image(
+                    st.session_state['selected_thumbnail_frame_path'], 
+                    caption=f"Selected: Frame {st.session_state.get('selected_thumbnail_frame_index', 0) + 1}",
+                    use_container_width=True
+                )
+        else:
+            st.info("📹 Upload a video to select thumbnail from frames")
+    
+    with col_thumb2:
+        uploaded_thumbnail = st.file_uploader(
+            "📤 Or Upload Custom Thumbnail",
+            type=['jpg', 'jpeg', 'png'],
+            help="Upload a custom thumbnail image (JPG, PNG)",
+            key="thumbnail_uploader"
+        )
+        if uploaded_thumbnail:
+            st.image(uploaded_thumbnail, caption="Custom Thumbnail", use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Step 3: Video Details Form
     with st.form("upload_video_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            uploaded_video = st.file_uploader(
-                "📹 Upload Video",
-                type=['mp4', 'mov', 'avi', 'mkv'],
-                help="Upload your video file (MP4, MOV, AVI, MKV)"
-            )
-        
-        with col2:
-            uploaded_thumbnail = st.file_uploader(
-                "🖼️ Upload Thumbnail",
-                type=['jpg', 'jpeg', 'png'],
-                help="Upload thumbnail image (JPG, PNG)"
-            )
-        
         title = st.text_input(
             "📝 Title",
             placeholder="Enter video title",
@@ -130,12 +227,29 @@ def show():
         submit_button = st.form_submit_button("📤 Upload Video", use_container_width=True, type="primary")
         
         if submit_button:
-            if not uploaded_video:
+            # Get video from session state (since file uploader is outside form)
+            video_bytes = st.session_state.get('upload_video_bytes')
+            video_name = st.session_state.get('upload_video_name')
+            
+            if not video_bytes:
                 st.error("⚠️ Please upload a video file")
             elif not title or title.strip() == '':
                 st.error("⚠️ Please enter a title")
             else:
                 try:
+                    # Determine thumbnail source: selected frame or custom upload
+                    thumbnail_bytes = None
+                    thumbnail_name = None
+                    
+                    if uploaded_thumbnail:
+                        # Use custom uploaded thumbnail
+                        thumbnail_bytes = uploaded_thumbnail.getvalue()
+                        thumbnail_name = uploaded_thumbnail.name
+                    elif st.session_state.get('selected_thumbnail_frame_bytes'):
+                        # Use selected frame as thumbnail
+                        thumbnail_bytes = st.session_state['selected_thumbnail_frame_bytes']
+                        thumbnail_name = f"frame_thumbnail_{st.session_state.get('selected_thumbnail_frame_index', 0)}.jpg"
+                    
                     # Check if Cloudinary is configured (required for persistent storage on Streamlit Cloud)
                     cloudinary_creds = config.get_cloudinary_credentials()
                     
@@ -153,11 +267,11 @@ def show():
                         # Upload video to Cloudinary
                         with st.spinner("☁️ Uploading video to cloud storage..."):
                             timestamp = int(datetime.now().timestamp())
-                            video_public_id = f"videos/upload_{timestamp}_{uploaded_video.name.rsplit('.', 1)[0]}"
+                            video_public_id = f"videos/upload_{timestamp}_{video_name.rsplit('.', 1)[0]}"
                             
                             video_result = upload_file_from_bytes(
-                                uploaded_video.getvalue(),
-                                filename=uploaded_video.name,
+                                video_bytes,
+                                filename=video_name,
                                 resource_type='video',
                                 public_id=video_public_id
                             )
@@ -169,15 +283,15 @@ def show():
                             video_path = video_result['secure_url']
                             st.success(f"✅ Video uploaded to cloud")
                         
-                        # Upload thumbnail to Cloudinary if provided
+                        # Upload thumbnail to Cloudinary if provided (from selected frame or custom upload)
                         thumbnail_path = None
-                        if uploaded_thumbnail:
+                        if thumbnail_bytes:
                             with st.spinner("☁️ Uploading thumbnail to cloud storage..."):
-                                thumb_public_id = f"thumbnails/upload_{timestamp}_{uploaded_thumbnail.name.rsplit('.', 1)[0]}"
+                                thumb_public_id = f"thumbnails/upload_{timestamp}_{thumbnail_name.rsplit('.', 1)[0]}"
                                 
                                 thumb_result = upload_file_from_bytes(
-                                    uploaded_thumbnail.getvalue(),
-                                    filename=uploaded_thumbnail.name,
+                                    thumbnail_bytes,
+                                    filename=thumbnail_name,
                                     resource_type='image',
                                     public_id=thumb_public_id
                                 )
@@ -194,18 +308,18 @@ def show():
                         os.makedirs(uploads_dir, exist_ok=True)
                         
                         timestamp = int(datetime.now().timestamp())
-                        video_filename = f"video_{timestamp}_{uploaded_video.name}"
+                        video_filename = f"video_{timestamp}_{video_name}"
                         video_path = os.path.join(uploads_dir, video_filename)
                         
                         with open(video_path, "wb") as f:
-                            f.write(uploaded_video.getbuffer())
+                            f.write(video_bytes)
                         
                         thumbnail_path = None
-                        if uploaded_thumbnail:
-                            thumbnail_filename = f"thumbnail_{timestamp}_{uploaded_thumbnail.name}"
+                        if thumbnail_bytes:
+                            thumbnail_filename = f"thumbnail_{timestamp}_{thumbnail_name}"
                             thumbnail_path = os.path.join(uploads_dir, thumbnail_filename)
                             with open(thumbnail_path, "wb") as f:
-                                f.write(uploaded_thumbnail.getbuffer())
+                                f.write(thumbnail_bytes)
                     
                     # Save to database
                     with st.spinner("💾 Saving to database..."):
@@ -223,6 +337,22 @@ def show():
                         ))
                     
                     st.success(f"✅ Video uploaded successfully! Video ID: {video_id}")
+                    
+                    # Clear session state after successful upload
+                    st.session_state['upload_video_bytes'] = None
+                    st.session_state['upload_video_name'] = None
+                    st.session_state['extracted_frames'] = []
+                    st.session_state['selected_thumbnail_frame_bytes'] = None
+                    st.session_state['selected_thumbnail_frame_index'] = None
+                    st.session_state['selected_thumbnail_frame_path'] = None
+                    
+                    # Cleanup temp files
+                    if st.session_state.get('temp_video_path') and os.path.exists(st.session_state['temp_video_path']):
+                        try:
+                            os.remove(st.session_state['temp_video_path'])
+                        except:
+                            pass
+                    
                     st.rerun()
                     
                 except Exception as e:
