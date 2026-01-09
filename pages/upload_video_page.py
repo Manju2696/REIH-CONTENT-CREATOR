@@ -81,9 +81,9 @@ def delete_file_from_storage(file_path: str):
                 print(f"[WARNING] Could not delete local file: {str(e)}")
 
 
-@st.dialog("🎬 Select Thumbnail from Video Frames", width="large")
+@st.dialog("Select cover", width="large")
 def select_thumbnail_dialog():
-    """Popup dialog to select a thumbnail from extracted video frames"""
+    """Popup dialog to select or upload a thumbnail"""
     
     if 'extracted_frames' not in st.session_state or not st.session_state['extracted_frames']:
         st.warning("⚠️ No frames available. Please upload a video first.")
@@ -91,55 +91,95 @@ def select_thumbnail_dialog():
     
     frames = st.session_state['extracted_frames']
     
-    st.markdown("**Click on a frame to select it as the thumbnail:**")
-    st.markdown("---")
+    # Initialize preview state if not set
+    if 'preview_frame_index' not in st.session_state:
+        # Default to middle frame or 0
+        st.session_state['preview_frame_index'] = len(frames) // 2 if frames else 0
+        
+    # Tabs for Select vs Upload
+    tab_select, tab_upload = st.tabs(["Select frame", "Upload image"])
     
-    # Display frames in a 5-column grid
-    cols = st.columns(5)
-    for idx, frame_path in enumerate(frames):
-        with cols[idx]:
-            st.image(frame_path, use_container_width=True, caption=f"Frame {idx + 1}")
-            if st.button(f"✓ Select", key=f"select_frame_{idx}", use_container_width=True):
-                # Read the frame file and store in session state
-                with open(frame_path, 'rb') as f:
+    with tab_select:
+        # Large Preview Area
+        preview_idx = st.session_state['preview_frame_index']
+        if 0 <= preview_idx < len(frames):
+            st.image(frames[preview_idx], use_container_width=True, caption=f"Preview: Frame {preview_idx + 1}")
+        
+        st.markdown("---")
+        st.caption("Select a frame from the video:")
+        
+        # Determine grid columns (5 columns for desktop-like feel)
+        cols = st.columns(5)
+        for idx, frame_path in enumerate(frames):
+            col_idx = idx % 5
+            with cols[col_idx]:
+                # Make the image clickable by using a button that sets the preview
+                # We show the image, then a small select button. 
+                # Streamlit doesn't support clickable images natively without plugins, so we use button under image.
+                st.image(frame_path, use_container_width=True)
+                # Highlight if selected
+                btn_type = "primary" if idx == preview_idx else "secondary"
+                if st.button(f"Frame {idx+1}", key=f"prev_btn_{idx}", use_container_width=True, type=btn_type):
+                    st.session_state['preview_frame_index'] = idx
+                    st.rerun()
+
+        st.markdown("---")
+        
+        # Confirm Button
+        col_confirm, col_shuffle = st.columns([2, 1])
+        with col_confirm:
+            if st.button("✅ Confirm Selection", use_container_width=True, type="primary"):
+                # Save the previewed frame as the selected thumbnail
+                selected_path = frames[st.session_state['preview_frame_index']]
+                with open(selected_path, 'rb') as f:
                     frame_bytes = f.read()
+                
                 st.session_state['selected_thumbnail_frame_bytes'] = frame_bytes
-                st.session_state['selected_thumbnail_frame_index'] = idx
-                st.session_state['selected_thumbnail_frame_path'] = frame_path
-                st.success(f"✅ Frame {idx + 1} selected!")
+                st.session_state['selected_thumbnail_frame_index'] = st.session_state['preview_frame_index']
+                st.session_state['selected_thumbnail_frame_path'] = selected_path
+                st.session_state['custom_thumbnail_bytes'] = None # Clear custom if frame selected
+                st.success("Thumbnail updated!")
                 st.rerun()
                 
-    st.markdown("---")
-    
-    # Option to shuffle/re-extract frames
-    if st.button("🔄 Shuffle / Re-extract Frames", use_container_width=True):
-        with st.spinner("🔄 Extracting new random frames..."):
-            try:
-                # Ensure we have a valid video path
-                video_path = st.session_state.get('temp_video_path')
-                video_bytes = st.session_state.get('upload_video_bytes')
+        with col_shuffle:
+             if st.button("🔄 Shuffle Frames", use_container_width=True):
+                with st.spinner("Extracting new frames..."):
+                    try:
+                        video_path = st.session_state.get('temp_video_path')
+                        video_bytes = st.session_state.get('upload_video_bytes')
+                        
+                        if not video_path or not os.path.exists(video_path):
+                            if video_bytes:
+                                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                                    tmp.write(video_bytes)
+                                    video_path = tmp.name
+                                st.session_state['temp_video_path'] = video_path
+                        
+                        new_frames = extract_frames_from_video(video_path, num_frames=20, randomize=True)
+                        st.session_state['extracted_frames'] = new_frames
+                        st.session_state['preview_frame_index'] = 0 # Reset preview
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    with tab_upload:
+        st.write("Upload a custom image to use as the thumbnail/cover.")
+        uploaded_custom = st.file_uploader("Choose an image", type=['png', 'jpg', 'jpeg'], key="dialog_uploader")
+        
+        if uploaded_custom:
+            st.image(uploaded_custom, caption="Custom Preview", width=300)
+            if st.button("✅ Use Uploaded Image", use_container_width=True, type="primary"):
+                st.session_state['selected_thumbnail_frame_bytes'] = None # Clear frame selection
+                st.session_state['selected_thumbnail_frame_index'] = None
+                st.session_state['selected_thumbnail_frame_path'] = None
                 
-                if not video_path or not os.path.exists(video_path):
-                    if video_bytes:
-                        # Recreate temp file
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-                            tmp.write(video_bytes)
-                            video_path = tmp.name
-                        st.session_state['temp_video_path'] = video_path
-                    else:
-                        st.error("⚠️ Video data missing. Please re-upload the video.")
-                        return
-                
-                # Re-extract frames with randomization
-                new_frames = extract_frames_from_video(video_path, num_frames=5, randomize=True)
-                
-                # Update session state
-                st.session_state['extracted_frames'] = new_frames
-                st.success("✅ New frames extracted!")
+                # Store custom bytes - we need a specific session key for this that the main page checks
+                # The main page currently checks 'selected_thumbnail_frame_bytes' OR 'uploaded_thumbnail' (file uploader).
+                # preventing the file uploader from disappearing is tricky if we move it here. 
+                # Instead, we'll store the bytes in a session var and the main page will use that.
+                st.session_state['custom_thumbnail_bytes'] = uploaded_custom.getvalue()
+                st.success("Custom thumbnail selected!")
                 st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ Error extracting frames: {str(e)}")
 
 
 def show():
@@ -186,7 +226,7 @@ def show():
                         temp_video_path = tmp.name
                     
                     # Extract 5 frames
-                    frames = extract_frames_from_video(temp_video_path, num_frames=5)
+                    frames = extract_frames_from_video(temp_video_path, num_frames=20)
                     st.session_state['extracted_frames'] = frames
                     st.session_state['temp_video_path'] = temp_video_path
                     st.success(f"✅ Extracted {len(frames)} frames from video")
@@ -203,7 +243,7 @@ def show():
         # Button to open frame selection dialog
         frames_available = len(st.session_state.get('extracted_frames', [])) > 0
         if frames_available:
-            if st.button("🎬 Select from Video Frames", use_container_width=True, type="secondary"):
+            if st.button("🎬 Select / Upload Cover", use_container_width=True, type="secondary"):
                 select_thumbnail_dialog()
             
             # Show selected frame preview
@@ -217,14 +257,16 @@ def show():
             st.info("📹 Upload a video to select thumbnail from frames")
     
     with col_thumb2:
-        uploaded_thumbnail = st.file_uploader(
-            "📤 Or Upload Custom Thumbnail",
-            type=['jpg', 'jpeg', 'png'],
-            help="Upload a custom thumbnail image (JPG, PNG)",
-            key="thumbnail_uploader"
-        )
-        if uploaded_thumbnail:
-            st.image(uploaded_thumbnail, caption="Custom Thumbnail", use_container_width=True)
+        # Display selected custom thumbnail if set via dialog
+        custom_thumb_bytes = st.session_state.get('custom_thumbnail_bytes')
+        if custom_thumb_bytes:
+            st.image(custom_thumb_bytes, caption="Custom Thumbnail Selected", use_container_width=True)
+            if st.button("❌ Remove Custom", key="remove_custom_thumb"):
+                st.session_state['custom_thumbnail_bytes'] = None
+                st.rerun()
+        # Fallback to empty if nothing selected
+        elif not st.session_state.get('selected_thumbnail_frame_path'):
+            st.info("👈 Use the button to select a frame or upload a cover image")
     
     st.markdown("---")
     
@@ -273,10 +315,10 @@ def show():
                     thumbnail_bytes = None
                     thumbnail_name = None
                     
-                    if uploaded_thumbnail:
-                        # Use custom uploaded thumbnail
-                        thumbnail_bytes = uploaded_thumbnail.getvalue()
-                        thumbnail_name = uploaded_thumbnail.name
+                    if st.session_state.get('custom_thumbnail_bytes'):
+                        # Use custom uploaded thumbnail from dialog
+                        thumbnail_bytes = st.session_state['custom_thumbnail_bytes']
+                        thumbnail_name = f"custom_thumbnail_{int(datetime.now().timestamp())}.png"
                     elif st.session_state.get('selected_thumbnail_frame_bytes'):
                         # Use selected frame as thumbnail
                         thumbnail_bytes = st.session_state['selected_thumbnail_frame_bytes']

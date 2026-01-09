@@ -23,7 +23,7 @@ except ImportError:
     PIL_AVAILABLE = False
     print("[WARNING] PIL/Pillow not available. Install with: pip install pillow")
 
-def extract_frames_from_video(video_path: str, num_frames: int = 12, output_dir: Optional[str] = None, randomize: bool = False) -> List[str]:
+def extract_frames_from_video(video_path: str, num_frames: int = 20, output_dir: Optional[str] = None, randomize: bool = False) -> List[str]:
     """
     Extract frames from a video file.
     
