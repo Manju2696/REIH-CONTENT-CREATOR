@@ -108,6 +108,38 @@ def select_thumbnail_dialog():
                 st.session_state['selected_thumbnail_frame_path'] = frame_path
                 st.success(f"✅ Frame {idx + 1} selected!")
                 st.rerun()
+                
+    st.markdown("---")
+    
+    # Option to shuffle/re-extract frames
+    if st.button("🔄 Shuffle / Re-extract Frames", use_container_width=True):
+        with st.spinner("🔄 Extracting new random frames..."):
+            try:
+                # Ensure we have a valid video path
+                video_path = st.session_state.get('temp_video_path')
+                video_bytes = st.session_state.get('upload_video_bytes')
+                
+                if not video_path or not os.path.exists(video_path):
+                    if video_bytes:
+                        # Recreate temp file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                            tmp.write(video_bytes)
+                            video_path = tmp.name
+                        st.session_state['temp_video_path'] = video_path
+                    else:
+                        st.error("⚠️ Video data missing. Please re-upload the video.")
+                        return
+                
+                # Re-extract frames with randomization
+                new_frames = extract_frames_from_video(video_path, num_frames=5, randomize=True)
+                
+                # Update session state
+                st.session_state['extracted_frames'] = new_frames
+                st.success("✅ New frames extracted!")
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Error extracting frames: {str(e)}")
 
 
 def show():

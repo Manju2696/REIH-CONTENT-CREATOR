@@ -23,7 +23,7 @@ except ImportError:
     PIL_AVAILABLE = False
     print("[WARNING] PIL/Pillow not available. Install with: pip install pillow")
 
-def extract_frames_from_video(video_path: str, num_frames: int = 12, output_dir: Optional[str] = None) -> List[str]:
+def extract_frames_from_video(video_path: str, num_frames: int = 12, output_dir: Optional[str] = None, randomize: bool = False) -> List[str]:
     """
     Extract frames from a video file.
     
@@ -31,6 +31,7 @@ def extract_frames_from_video(video_path: str, num_frames: int = 12, output_dir:
         video_path: Path to the video file
         num_frames: Number of frames to extract (default: 12)
         output_dir: Directory to save frames (optional, creates temp dir if not provided)
+        randomize: If True, extract random frames instead of evenly spaced ones
     
     Returns:
         List of paths to extracted frame images
@@ -63,11 +64,21 @@ def extract_frames_from_video(video_path: str, num_frames: int = 12, output_dir:
         cap.release()
         raise ValueError("Video file has no frames")
     
-    # Calculate frame indices to extract (evenly spaced)
+    # Calculate frame indices to extract
     frame_indices = []
     if num_frames >= total_frames:
         # Extract all frames
         frame_indices = list(range(total_frames))
+    elif randomize:
+        import random
+        # Extract random frames (ensuring they are sorted for sequential reading)
+        # Avoid the very first and very last frames usually
+        safe_margin = int(total_frames * 0.05) if total_frames > 100 else 0
+        available_range = range(safe_margin, total_frames - safe_margin)
+        if len(available_range) < num_frames:
+            available_range = range(total_frames)
+            
+        frame_indices = sorted(random.sample(available_range, num_frames))
     else:
         # Extract evenly spaced frames
         step = total_frames / (num_frames + 1)
